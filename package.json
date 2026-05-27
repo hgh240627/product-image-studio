@@ -1,0 +1,50 @@
+{
+  "name": "product-image-studio",
+  "version": "0.1.22",
+  "productName": "全自动套图生成",
+  "description": "Local desktop tool for automated product image set generation.",
+  "author": "Local",
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/start-electron.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer/app.js && node scripts/check-local-file-reference-guard.js",
+    "prompt-check": "node scripts/prompt-regression-check.js",
+    "trend-check": "node scripts/trend-network-check.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win zip"
+  },
+  "build": {
+    "appId": "com.local.auto-image-set-generator",
+    "productName": "全自动套图生成",
+    "electronVersion": "39.8.10",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/app-icon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.12",
+    "electron": "^39.2.4"
+  }
+}

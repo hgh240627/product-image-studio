@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>全自动套图生成</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="inviteGate" class="invite-gate">
+      <div class="invite-card">
+        <h1>使用前必须持有该应用开发者的邀请码</h1>
+        <label for="inviteCode">请输入邀请码</label>
+        <input id="inviteCode" type="password" autocomplete="off" />
+        <div class="invite-options">
+          <label><input id="autoLogin" type="checkbox" checked />自动登录</label>
+          <label><input id="rememberInvite" type="checkbox" />记住邀请码</label>
+        </div>
+        <button id="inviteSubmit" class="primary-button">进入软件</button>
+        <div id="inviteError" class="invite-error hidden">邀请码错误，无法使用本软件。</div>
+      </div>
+    </div>
+
+    <div id="app" class="hidden">
+      <div class="app-shell">
+        <aside class="side-nav">
+          <div class="side-nav-head">
+            <div class="side-nav-mark">A</div>
+            <div>
+              <strong>功能导航</strong>
+              <small>图片制作 / 标题优化 / 视频制作</small>
+            </div>
+          </div>
+          <nav class="side-nav-list" aria-label="功能页面">
+            <button type="button" class="side-nav-item active" data-route="image">图片制作</button>
+            <button type="button" class="side-nav-item" data-route="title">标题优化</button>
+            <button type="button" class="side-nav-item" data-route="video">产品视频制作（正在开发中）</button>
+          </nav>
+        </aside>
+        <div class="app-main">
+          <section id="imagePage" class="app-page">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="app-mark">虎</div>
+          <div>
+            <h1>全自动套图生成</h1>
+            <p id="routeLabel">Grsai /v1/images/generations · Gemini 提示词</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="apiState" class="state-pill">API 未配置</span>
+          <button id="openSettingsBtn" class="icon-button" title="API 设置">设置</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel controls">
+          <div class="flow-card upload-flow-card">
+            <div class="flow-head">
+              <span class="step-index">1</span>
+              <div>
+                <strong>上传产品图</strong>
+                <small>先给软件真实产品依据，后续会围绕这些图保持一致性。</small>
+              </div>
+            </div>
+            <div class="upload-stack">
+              <div id="cutoutDropzone" class="dropzone cutout-dropzone">
+                <input id="cutoutFileInput" type="file" accept="image/*" />
+                <button id="cutoutActionBtn" type="button" class="upload-main cutout-action-button">白底图制作</button>
+                <span id="cutoutHint" class="upload-sub">10M 以内，点击或拖拽随手拍产品图</span>
+              </div>
+              <label id="dropzone" class="dropzone product-dropzone">
+                <input id="fileInput" type="file" accept="image/*" multiple />
+                <span id="productUploadMain" class="upload-main">上传产品图</span>
+                <span id="productUploadHint" class="upload-sub">最多 6 张，建议含正面、细节、包装或套装全貌</span>
+              </label>
+            </div>
+            <div id="thumbs" class="thumbs"></div>
+          </div>
+
+          <div class="flow-card package-flow-card">
+            <div class="flow-head">
+              <span class="step-index">2</span>
+              <div>
+                <strong>选择产品形态</strong>
+                <small id="packageModeHint">单品：围绕一个产品和真实使用关系生成套图。</small>
+              </div>
+            </div>
+            <div id="productPackageMode" class="package-tabs package-tabs-large" role="group" aria-label="产品形态">
+              <button type="button" data-value="single" class="active">单品</button>
+              <button type="button" data-value="bundle">组合装</button>
+              <button type="button" data-value="multipack">多PCS装</button>
+            </div>
+          </div>
+
+          <div class="flow-card product-brief-card">
+            <div class="flow-head">
+              <span class="step-index">3</span>
+              <div>
+                <strong id="productBriefTitle">填写单品信息</strong>
+                <small id="productBriefCaption">写清名称和用途，AI 会结合图片自动补全卖点和分镜。</small>
+              </div>
+            </div>
+            <div class="product-brief-grid">
+              <label class="field-label" id="productNameLabel" for="productName">产品名称</label>
+              <input id="productName" type="text" maxlength="200" placeholder="请填写产品名称" />
+
+              <label class="field-label" id="productInfoLabel" for="productInfo">产品描述</label>
+              <textarea id="productInfo" maxlength="2500" placeholder="请填写有关产品的使用方式或者产品的卖点"></textarea>
+              <div id="productModeTips" class="product-mode-tips">
+                建议补充：使用场景、适配对象、核心卖点、销售地区或发布平台。
+              </div>
+              <div class="row product-analysis-row">
+                <button id="analyzeBtn" class="secondary-button analyze-inline">AI 自动分析</button>
+                <span id="charCount" class="muted">0/2700</span>
+              </div>
+            </div>
+          </div>
+
+          <label class="field-label">品牌基因（可选）</label>
+          <button id="openBrandBtn" class="setting-card">
+            <span class="auto-badge">Auto</span>
+            <span>
+              <strong>智能品牌基因</strong>
+              <small>请选择平台、售卖地区、文案语言</small>
+              <small id="brandSummary">智能主色、智能字体风格</small>
+            </span>
+            <span class="chevron">›</span>
+          </button>
+
+          <label class="field-label">生图模型</label>
+          <div class="image-model-card">
+            <div class="image-model-card-head">
+              <span id="imageModelTierBadge">普通模型</span>
+              <strong id="currentImageModelName">gpt-image-2</strong>
+            </div>
+            <small id="currentImageModelDesc">适合日常套图，速度和成本更稳。</small>
+          </div>
+          <div class="model-tier-tabs" id="modelTierTabs" role="group" aria-label="生图模型等级">
+            <button type="button" data-tier="standard" class="active">普通模型</button>
+            <button type="button" data-tier="advanced">高级模型</button>
+          </div>
+          <select id="modelRoute"></select>
+          <small id="modelRouteHint" class="field-hint">生成时会在中间进度和结果卡片显示当前模型。</small>
+
+          <label class="field-label">分辨率选择</label>
+          <div class="segmented" id="resolutionGroup">
+            <button data-value="1K" class="active">1K</button>
+            <button data-value="2K">2K</button>
+            <button data-value="4K">4K</button>
+          </div>
+
+          <label class="field-label">生成图片</label>
+          <div class="kind-list">
+            <div class="kind-row" data-kind="主图">
+              <label><input type="checkbox" name="imageKind" value="主图" checked />主图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="SKU图">
+              <label><input type="checkbox" name="imageKind" value="SKU图" />SKU图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="卖点图">
+              <label><input type="checkbox" name="imageKind" value="卖点图" checked />卖点图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="白底图">
+              <label><input type="checkbox" name="imageKind" value="白底图" />白底图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="场景图">
+              <label><input type="checkbox" name="imageKind" value="场景图" checked />场景图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="特写图">
+              <label><input type="checkbox" name="imageKind" value="特写图" />特写图</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+            <div class="kind-row" data-kind="高级A+">
+              <label><input type="checkbox" name="imageKind" value="高级A+" />高级 A+</label>
+              <div class="mini-stepper">
+                <button type="button" data-kind-action="minus">−</button>
+                <input type="number" min="0" max="10" step="1" data-kind-count value="0" />
+                <button type="button" data-kind-action="plus">＋</button>
+              </div>
+            </div>
+          </div>
+          <div id="aPlusOptions" class="subpanel hidden">
+            <label class="field-label" for="aPlusSize">A+ 尺寸</label>
+            <select id="aPlusSize">
+              <option value="970x300">970 × 300</option>
+              <option value="970x600">970 × 600</option>
+              <option value="1464x600">1464 × 600</option>
+              <option value="600x450">600 × 450</option>
+            </select>
+          </div>
+
+          <label class="field-label">生成比例</label>
+          <div class="ratio-grid" id="ratioGroup">
+            <button data-value="1:1" class="active">1:1</button>
+            <button data-value="3:4">3:4</button>
+            <button data-value="4:3">4:3</button>
+            <button data-value="2:3">2:3</button>
+            <button data-value="3:2">3:2</button>
+            <button data-value="16:9">16:9</button>
+          </div>
+
+          <div class="task-total">
+            <span>本次总图数</span>
+            <strong id="totalCountValue">4</strong>
+          </div>
+        </section>
+
+        <section class="panel stage-panel">
+          <div class="preview-head">
+            <div>
+              <h2>套图工作台</h2>
+              <p id="statusLine">等待上传商品图或填写商品信息</p>
+            </div>
+            <button id="generateBtn" class="primary-button">生成图片</button>
+          </div>
+
+          <div class="analysis-grid">
+            <div>
+              <label class="field-label" for="summaryBox">商品识别</label>
+              <textarea id="summaryBox" readonly placeholder="AI 自动识别产品后显示"></textarea>
+            </div>
+            <div>
+              <label class="field-label" for="sellingPointsBox">卖点</label>
+              <textarea id="sellingPointsBox" readonly placeholder="AI 自动识别产品后显示"></textarea>
+            </div>
+          </div>
+
+          <div class="suite-control-row">
+            <div class="model-channel">
+              <span></span>
+              <strong id="planningModelLabel">跟随当前设置</strong>
+            </div>
+          </div>
+
+          <details class="base-prompt-panel">
+            <summary>产品身份提示词</summary>
+            <textarea id="promptBox" class="prompt-box" placeholder="点击 AI 自动识别产品后生成。软件会按左侧选择的图片类型自动拆分成独立分镜提示词。"></textarea>
+          </details>
+
+          <section class="suite-plan-panel">
+            <div class="section-title">
+              <span>套图策划</span>
+              <small id="suitePlanStatus"></small>
+            </div>
+            <div id="styleMasterBox" class="style-master-box empty"></div>
+            <div id="promptPlanList" class="prompt-plan-list empty"></div>
+          </section>
+
+          <div id="progressBox" class="progress-box hidden">
+            <div class="progress-meta">
+              <span id="progressText">生成中</span>
+              <span id="progressNumber">0%</span>
+            </div>
+            <div class="progress-track"><div id="progressFill"></div></div>
+          </div>
+
+          <div class="result-warning">生成图片会在本机临时保留 3 天，超过 3 天后自动清理。</div>
+          <div id="results" class="results empty">
+            <div class="empty-result-state" aria-label="暂无生成结果">
+              <span class="empty-result-icon">AI</span>
+              <strong>暂无生成结果</strong>
+              <small>上传产品图并完成 AI 分析后即可生成套图</small>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel output-panel">
+          <div class="output-head">
+            <div>
+              <h2>预览与保存</h2>
+              <p id="selectedMeta">请选择一张结果图</p>
+            </div>
+          </div>
+
+          <div id="selectedPreview" class="selected-preview empty">
+            <span>暂无预览</span>
+            <img id="selectedPreviewImg" class="hidden" src="" alt="当前预览图" />
+          </div>
+
+          <div class="selected-actions">
+            <button id="saveSelectedBtn" class="secondary-button" type="button" disabled>保存当前</button>
+            <button id="openSelectedBtn" class="secondary-button" type="button" disabled>放大预览</button>
+          </div>
+
+          <label class="field-label" for="promptEditor">单张提示词</label>
+          <textarea id="promptEditor" class="prompt-editor" placeholder="选择结果图后可编辑该张提示词并单张重生成"></textarea>
+          <button id="regenerateSelectedBtn" class="primary-button regenerate-button" type="button" disabled>重生成当前图</button>
+
+          <div class="repair-panel">
+            <div class="section-title">
+              <span>局部标记修复</span>
+              <button id="clearRepairMarksBtn" class="ghost-button compact" type="button" disabled>清除标记</button>
+            </div>
+            <div id="repairCanvasWrap" class="repair-canvas-wrap empty">
+              <span>选择结果图后，可在这里圈出变形位置</span>
+              <img id="repairCanvasImage" class="hidden" alt="局部修复底图" />
+              <canvas id="repairCanvas" class="hidden"></canvas>
+            </div>
+            <textarea id="repairInstruction" class="repair-instruction" maxlength="600" placeholder="写清楚要修复什么，例如：只修正左侧刀柄形状，保持其他区域不变"></textarea>
+            <button id="repairSelectedBtn" class="primary-button regenerate-button" type="button" disabled>按标记局部修复</button>
+          </div>
+
+          <div class="history-block">
+            <div class="section-title">
+              <span>历史图库</span>
+              <button id="recoverHistoryBtn" class="ghost-button compact" type="button">恢复缓存</button>
+            </div>
+            <div id="historyList" class="history-list"></div>
+          </div>
+        </aside>
+      </main>
+
+      <aside id="brandDrawer" class="drawer hidden">
+        <div class="drawer-card">
+          <div class="drawer-head">
+            <h2>品牌基因设置</h2>
+            <button id="closeBrandBtn" class="ghost-button">×</button>
+          </div>
+
+          <label class="field-label">品牌主色</label>
+          <div class="color-row">
+            <input id="primaryColor" type="color" value="#7c3aed" />
+            <select id="colorMode">
+              <option value="auto">智能主色</option>
+              <option value="custom">使用自定义颜色</option>
+            </select>
+          </div>
+
+          <label class="field-label">字体风格</label>
+          <select id="fontStyle">
+            <option value="auto">智能字体风格</option>
+            <option value="geometric">几何无衬线体：科技产品、现代家具</option>
+            <option value="bold">硬朗无衬线体：五金工具、户外用品</option>
+            <option value="elegant">优雅衬线体：化妆品、复古、高奢</option>
+          </select>
+
+          <label class="field-label">销售国家/地区</label>
+          <select id="region">
+            <option value="US">US（美国）</option>
+            <option value="CN">CN（中国）</option>
+            <option value="EU">EU（欧洲）</option>
+            <option value="JP">JP（日本）</option>
+            <option value="BR">BR（巴西）</option>
+            <option value="KR">KR（韩国）</option>
+            <option value="THA">THA（泰国）</option>
+            <option value="RU">RU（俄罗斯）</option>
+          </select>
+
+          <label class="field-label">生成图片语言</label>
+          <select id="language">
+            <option value="English">英语</option>
+            <option value="Chinese">中文</option>
+            <option value="Japanese">日语</option>
+            <option value="Russian">俄语</option>
+            <option value="Italian">意大利语</option>
+            <option value="French">法语</option>
+            <option value="Spanish">西班牙语</option>
+            <option value="German">德语</option>
+          </select>
+
+          <label class="field-label">发布平台</label>
+          <select id="platform">
+            <option value="Amazon">亚马逊</option>
+            <option value="Temu">Temu</option>
+            <option value="Shopee">Shopee</option>
+            <option value="Shein">Shein</option>
+            <option value="AliExpress">速卖通</option>
+            <option value="Shopify">Shopify</option>
+            <option value="eBay">eBay</option>
+            <option value="Etsy">Etsy</option>
+          </select>
+
+          <label class="field-label" for="customStyle">自定义设置</label>
+          <textarea id="customStyle" maxlength="500" placeholder="视觉氛围、设计风格、禁用元素等"></textarea>
+
+          <div class="drawer-actions">
+            <button id="saveBrandBtn" class="primary-button">完成</button>
+          </div>
+        </div>
+      </aside>
+
+      <aside id="settingsDrawer" class="drawer hidden settings-drawer">
+        <div class="settings-service-shell">
+          <div class="settings-provider-pane">
+            <div class="drawer-head">
+              <h2>模型服务</h2>
+              <button id="closeSettingsBtn" class="ghost-button">×</button>
+            </div>
+            <div class="provider-search-row">
+              <input id="providerSearch" type="search" placeholder="搜索模型平台..." />
+            </div>
+            <div id="providerList" class="provider-list"></div>
+            <button id="addProviderBtn" type="button" class="add-provider-button">＋ 添加</button>
+          </div>
+
+          <div class="settings-model-pane">
+            <div class="provider-detail-head">
+              <div>
+                <div class="provider-title-row">
+                  <strong id="promptProviderTitle">模型供应商</strong>
+                  <button id="promptApiSettingsBtn" type="button" class="icon-mini-button hidden" title="API 设置">⚙</button>
+                </div>
+                <small id="promptProviderHint">选择供应商后填写 API Key 即可检测连接。</small>
+              </div>
+              <label class="switch">
+                <input id="promptProviderToggle" type="checkbox" />
+                <span></span>
+              </label>
+            </div>
+
+            <select id="promptProvider" class="hidden">
+              <option value="grsai-gemini">Grsai Gemini（推荐）</option>
+              <option value="zyapi">ZyAPI</option>
+              <option value="openai-response">OpenAI-Response</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Gemini</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="qwen">千问</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="doubao">豆包</option>
+              <option value="zhipu">智普</option>
+              <option value="xiaomi">小米</option>
+            </select>
+
+            <div class="api-section">
+              <div class="api-section-title">
+                <label class="field-label" for="promptApiKey">API 密钥</label>
+                <button id="savePromptApiKeyBtn" type="button" class="icon-mini-button" title="保存当前 Key">保存</button>
+              </div>
+              <div class="api-key-row cherry-key-row">
+                <input id="promptApiKey" type="password" placeholder="API 密钥" />
+                <button id="testPromptApiBtn" type="button" class="secondary-button">检测</button>
+              </div>
+              <small id="promptApiKeyHint" class="field-hint">多个密钥使用逗号分隔。</small>
+            </div>
+
+            <div class="api-section">
+              <div class="api-section-title">
+                <label class="field-label" for="promptBaseUrl">API 地址</label>
+              </div>
+              <input id="promptBaseUrl" type="text" placeholder="API 地址" />
+              <small id="promptApiAddressPreview" class="field-hint">预览：</small>
+            </div>
+
+            <div class="model-toolbar">
+              <div class="model-toolbar-title">
+                <strong>模型</strong>
+                <span id="promptModelCount">0</span>
+              </div>
+              <select id="promptModel" class="hidden"></select>
+              <input id="promptModelCustom" type="text" class="hidden" placeholder="手动输入模型名" />
+              <select id="promptEndpoint" class="hidden">
+                <option value="responses">OpenAI Responses：/v1/responses</option>
+                <option value="chat">Chat Completions：/v1/chat/completions</option>
+                <option value="auto">自动尝试</option>
+                <option value="gemini">Gemini：generateContent</option>
+                <option value="anthropic">Anthropic：/v1/messages</option>
+              </select>
+              <button id="fetchPromptModelsBtn" type="button" class="secondary-button compact-action">获取模型列表</button>
+              <button id="addPromptModelBtn" type="button" class="icon-mini-button" title="添加模型">＋</button>
+            </div>
+            <div id="promptModelList" class="prompt-model-list"></div>
+            <small id="promptModelHint" class="field-hint">模型能力图标可手动开关，AI 分析会使用当前选中的模型。</small>
+            <small id="promptApiActionStatus" class="field-hint"></small>
+
+            <details class="legacy-image-settings">
+              <summary>作图 API 与其他设置</summary>
+
+          <label class="field-label" for="trendProxyUrl">Google Trends 代理地址（可选）</label>
+          <input id="trendProxyUrl" type="text" placeholder="例如：http://127.0.0.1:7890" />
+          <small class="field-hint">国内网络通常需要代理访问 Google Trends/Google 搜索建议；留空则直连。</small>
+
+          <hr />
+
+          <label class="field-label" for="imageProvider">作图 API 供应商</label>
+          <div class="icon-select-shell" data-icon-for="imageProvider">
+            <img id="imageProviderIcon" class="provider-icon" src="../assets/model-icons/nano-banana.svg" alt="" />
+            <select id="imageProvider">
+              <option value="grsai">Grsai（当前）</option>
+              <option value="openai">OpenAI Images</option>
+              <option value="qwen">通义万相</option>
+              <option value="doubao">火山方舟/即梦</option>
+              <option value="stability">Stability AI</option>
+              <option value="replicate">Replicate</option>
+              <option value="kling">可灵 Kling</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="midjourney">Midjourney（MJ）</option>
+              <option value="bfl">黑森林 Black Forest Labs</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <button id="applyImageProviderPresetBtn" type="button" class="secondary-button preset-fill-button">自动填充作图配置</button>
+          <small id="imageProviderHint" class="field-hint">默认使用 Grsai。其他供应商可先保存配置，非 Grsai 协议需要后续专门适配生成接口。</small>
+
+          <label class="field-label" for="imageProviderType">作图适配类型</label>
+          <select id="imageProviderType">
+            <option value="grsai">Grsai：/v1/images/generations</option>
+            <option value="openai-images">OpenAI Images：/v1/images</option>
+            <option value="gemini">Google Gemini：generateContent</option>
+            <option value="bfl">Black Forest Labs：FLUX API</option>
+            <option value="custom">自定义/待适配</option>
+          </select>
+          <label class="field-label" for="grsaiBaseUrl">作图 API 地址</label>
+          <input id="grsaiBaseUrl" type="text" />
+          <label class="field-label" for="grsaiApiKey">作图 API Key</label>
+          <div class="api-key-row">
+            <input id="grsaiApiKey" type="password" />
+            <button id="saveImageApiKeyBtn" type="button" class="secondary-button">保存 Key</button>
+          </div>
+          <small id="imageApiKeyHint" class="field-hint">可按作图供应商保存 Key，切换供应商时会自动填回。</small>
+          <label class="field-label" for="grsai1kModel">普通自动模型</label>
+          <div class="icon-select-shell" data-icon-for="grsai1kModel">
+            <img id="grsai1kModelIcon" class="provider-icon" src="../assets/model-icons/chatgpt.svg" alt="" />
+            <select id="grsai1kModel"></select>
+          </div>
+          <input id="grsai1kModelCustom" type="text" class="hidden" placeholder="手动输入普通自动模型" />
+          <small class="field-hint">左侧选择“普通模型 + 自动”时会优先使用这里的模型；普通模型适合快速试图、常规主图/SKU/白底图。</small>
+          <label class="field-label" for="grsai2kModel">高级自动模型</label>
+          <div class="icon-select-shell icon-select-shell-advanced" data-icon-for="grsai2kModel">
+            <img id="grsai2kModelIcon" class="provider-icon" src="../assets/model-icons/chatgpt.svg" alt="" />
+            <select id="grsai2kModel"></select>
+          </div>
+          <input id="grsai2kModelCustom" type="text" class="hidden" placeholder="手动输入高级自动模型" />
+          <small class="field-hint">左侧选择“高级模型 + 自动”时会优先使用这里的模型；高级模型适合一致性、复杂场景、细节控制和局部修复。</small>
+          <div class="api-action-row">
+            <button id="testImageApiBtn" type="button" class="secondary-button">检测连接状态</button>
+            <button id="fetchImageModelsBtn" type="button" class="secondary-button">获取模型列表</button>
+          </div>
+          <small id="imageApiActionStatus" class="field-hint"></small>
+          <label class="field-label" for="grsaiConcurrency">并发生图数量</label>
+          <input id="grsaiConcurrency" type="number" min="1" max="12" step="1" />
+
+          <div class="drawer-actions">
+            <button id="saveSettingsBtn" class="primary-button">保存设置</button>
+          </div>
+            </details>
+        </div>
+        </div>
+      </aside>
+
+      <div id="imageViewer" class="image-viewer hidden">
+        <div class="image-viewer-card">
+          <div class="image-viewer-head">
+            <span id="imageViewerTitle">图片预览</span>
+            <button id="closeImageViewer" class="ghost-button">×</button>
+          </div>
+          <img id="imageViewerImg" src="" alt="图片预览" />
+        </div>
+      </div>
+
+      <div id="cutoutConfirm" class="modal hidden">
+        <div class="confirm-card">
+          <div class="drawer-head">
+            <h2>白底图已生成</h2>
+            <button id="cutoutCancelX" class="ghost-button">×</button>
+          </div>
+          <div class="cutout-compare">
+            <div>
+              <strong>上传原图</strong>
+              <img id="cutoutOriginalPreview" src="" alt="上传原图预览" />
+            </div>
+            <div>
+              <strong>白底图</strong>
+              <img id="cutoutPreview" src="" alt="白底图预览" />
+            </div>
+          </div>
+          <label class="confirm-option">
+            <input id="cutoutUploadConfirm" type="checkbox" checked />
+            将此次生成的白底图上传到产品图中
+          </label>
+          <div class="confirm-actions">
+            <button id="cutoutCancelBtn" class="secondary-button">取消</button>
+            <button id="cutoutSaveBtn" class="secondary-button">另存为</button>
+            <button id="cutoutConfirmBtn" class="primary-button">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="repairResultModal" class="modal hidden">
+        <div class="confirm-card repair-result-card">
+          <div class="drawer-head">
+            <h2>局部修改已完成</h2>
+            <button id="repairResultCloseX" class="ghost-button">×</button>
+          </div>
+          <div class="repair-result-preview">
+            <img id="repairResultPreview" src="" alt="局部修改结果预览" />
+          </div>
+          <div class="confirm-actions">
+            <button id="repairResultCloseBtn" class="secondary-button">关闭</button>
+            <button id="repairResultSaveBtn" class="primary-button">另存为</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="apiAdvancedModal" class="modal hidden">
+        <div class="confirm-card api-advanced-card">
+          <div class="drawer-head">
+            <h2>API 设置</h2>
+            <button id="closeApiAdvancedBtn" class="ghost-button">×</button>
+          </div>
+          <label class="toggle-row"><span>支持数组格式的 message content</span><input type="checkbox" data-api-option="arrayMessages" checked /></label>
+          <label class="toggle-row"><span>支持 Developer Message</span><input type="checkbox" data-api-option="developerMessage" /></label>
+          <label class="toggle-row"><span>支持 stream_options</span><input type="checkbox" data-api-option="streamOptions" checked /></label>
+          <label class="toggle-row"><span>支持 service_tier</span><input type="checkbox" data-api-option="serviceTier" /></label>
+          <label class="toggle-row"><span>支持 enable_thinking</span><input type="checkbox" data-api-option="enableThinking" checked /></label>
+          <label class="toggle-row"><span>支持 verbosity</span><input type="checkbox" data-api-option="verbosity" checked /></label>
+        </div>
+      </div>
+
+      <div id="providerAddModal" class="modal hidden">
+        <div class="confirm-card provider-add-card">
+          <div class="drawer-head">
+            <h2>添加供应商</h2>
+            <button id="closeProviderAddBtn" class="ghost-button">×</button>
+          </div>
+          <div class="provider-add-avatar">P</div>
+          <label class="field-label" for="providerNameInput">提供商名称</label>
+          <input id="providerNameInput" type="text" placeholder="例如 OpenAI" />
+          <label class="field-label" for="providerTypeSelect">提供商类型</label>
+          <select id="providerTypeSelect">
+            <option value="openai">OpenAI</option>
+            <option value="openai-response">OpenAI-Response</option>
+            <option value="gemini">Gemini</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="new-api">New API</option>
+            <option value="cherryin">CherryIN</option>
+            <option value="ollama">Ollama</option>
+          </select>
+          <div class="confirm-actions">
+            <button id="cancelProviderAddBtn" class="secondary-button" type="button">取消</button>
+            <button id="confirmProviderAddBtn" class="primary-button" type="button">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="modelEditModal" class="modal hidden">
+        <div class="confirm-card model-edit-card">
+          <div class="drawer-head">
+            <h2 id="modelEditTitle">编辑模型</h2>
+            <button id="closeModelEditBtn" class="ghost-button">×</button>
+          </div>
+          <label class="field-label" for="modelEditId">模型 ID</label>
+          <input id="modelEditId" type="text" />
+          <label class="field-label" for="modelEditName">模型名称</label>
+          <input id="modelEditName" type="text" />
+          <label class="field-label" for="modelEditGroup">分组名称</label>
+          <input id="modelEditGroup" type="text" />
+          <div class="model-capability-editor">
+            <label><input type="checkbox" data-model-capability="vision" />视觉</label>
+            <label><input type="checkbox" data-model-capability="web" />联网</label>
+            <label><input type="checkbox" data-model-capability="reasoning" />推理</label>
+            <label><input type="checkbox" data-model-capability="tools" />工具</label>
+            <label><input type="checkbox" data-model-capability="rerank" />重排</label>
+            <label><input type="checkbox" data-model-capability="embedding" />嵌入</label>
+          </div>
+          <div class="confirm-actions">
+            <button id="modelEditSaveBtn" class="primary-button" type="button">保存</button>
+          </div>
+        </div>
+      </div>
+
+          </section>
+
+          <section id="titlePage" class="app-page hidden">
+            <div class="page-head">
+              <div>
+                <h2>标题优化</h2>
+                <p id="titleStatusLine">上传产品图或填写产品名称后生成标题</p>
+              </div>
+              <button id="titleGenerateBtn" class="primary-button">生成标题</button>
+            </div>
+            <div class="title-grid">
+              <section class="panel title-controls">
+                <label class="field-label">平台</label>
+                <div id="titlePlatformGroup" class="segmented two-tabs" role="group" aria-label="平台">
+                  <button type="button" data-value="Temu" class="active">Temu</button>
+                  <button type="button" data-value="Amazon">Amazon</button>
+                </div>
+
+                <label class="field-label">产品形态</label>
+                <div id="titlePackageMode" class="package-tabs title-package-tabs" role="group" aria-label="产品形态">
+                  <button type="button" data-value="single" class="active">单品</button>
+                  <button type="button" data-value="bundle">组合装</button>
+                  <button type="button" data-value="multipack">多PCS装</button>
+                </div>
+                <small class="field-hint">标题会按单品、组合装或多 PCS 装调整购买单位和数量表达。</small>
+
+                <label class="field-label">产品图片</label>
+                <div class="title-upload-stack">
+                  <label id="titleDropzone" class="dropzone title-dropzone">
+                    <input id="titleFileInput" type="file" accept="image/*" multiple />
+                    <span class="upload-main">上传产品图片</span>
+                    <span id="titleUploadHint" class="upload-sub">10M 以内，最多 6 张；支持拖拽上传</span>
+                  </label>
+                  <div id="titleThumbs" class="thumbs title-thumbs"></div>
+                </div>
+
+                <label class="field-label" for="titleProductName">产品名称</label>
+                <input id="titleProductName" type="text" maxlength="200" placeholder="只填产品名称也可以，例如：防溅盖 / Splatter Screen" />
+
+                <label class="field-label" for="titleProductInfo">商品补充信息（可选）</label>
+                <textarea id="titleProductInfo" maxlength="2500" placeholder="可补充核心卖点、材质、尺寸、用途、适配对象、兼容信息等；没有就留空"></textarea>
+
+                <label class="field-label" for="titleOperatorKeywords">添加运营关键词</label>
+                <textarea id="titleOperatorKeywords" maxlength="1000" placeholder="运营买手提供的类目词、场景词、功能词、搜索词，支持换行或逗号分隔"></textarea>
+              </section>
+
+              <section class="panel title-results">
+                <div class="title-result-head">
+                  <div>
+                    <h3>推荐标题</h3>
+                    <p id="titleLength">0 字符</p>
+                  </div>
+                  <button id="copyTitleBtn" class="secondary-button">复制标题</button>
+                </div>
+                <div id="titleResultMain" class="title-variant-list empty">生成后显示 3 条标题方案</div>
+
+                <details id="titleDetailsToggle" class="title-details-toggle">
+                  <summary>展开隐藏信息</summary>
+                  <div class="title-detail-grid">
+                    <div>
+                      <label class="field-label">标题结构</label>
+                    <div id="titleStructureBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">中英文对照</label>
+                    <div id="titlePairBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">趋势词</label>
+                    <div id="titleTrendBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">备选标题</label>
+                    <div id="titleAlternatesBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">合规提示</label>
+                    <div id="titleComplianceBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">说明</label>
+                    <div id="titleSummaryBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                    <div>
+                      <label class="field-label">提示</label>
+                    <div id="titleWarningsBox" class="detail-box empty">暂无结果</div>
+                    </div>
+                  </div>
+                </details>
+              </section>
+            </div>
+          </section>
+
+          <section id="videoPage" class="app-page hidden">
+            <div class="coming-soon-panel">
+              <h2>产品视频制作</h2>
+              <p>正在开发中，敬请期待</p>
+            </div>
+          </section>
+
+          <div id="toast" class="toast hidden"></div>
+          <div id="errorModal" class="modal hidden">
+            <div class="error-card">
+              <div class="drawer-head">
+                <h2 id="errorModalTitle">标题生成失败</h2>
+                <button id="errorModalCloseX" class="ghost-button">×</button>
+              </div>
+              <p id="errorModalMessage" class="error-modal-message"></p>
+              <div class="confirm-actions">
+                <button id="errorModalClose" class="primary-button">知道了</button>
+              </div>
+            </div>
+          </div>
+          <div id="imageTestModal" class="modal hidden">
+            <div class="confirm-card image-test-card">
+              <div class="drawer-head">
+                <div>
+                  <h2>选择真实检测模型</h2>
+                  <p id="imageTestProviderLabel" class="field-hint"></p>
+                </div>
+                <button id="imageTestCloseX" class="ghost-button">×</button>
+              </div>
+              <p id="imageTestModelHint" class="image-test-warning"></p>
+              <label class="field-label" for="imageTestModelSelect">本次要检测的作图模型</label>
+              <select id="imageTestModelSelect"></select>
+              <input id="imageTestModelCustom" class="hidden" type="text" placeholder="手动输入要检测的模型名" />
+              <div class="confirm-actions">
+                <button id="imageTestCancelBtn" class="secondary-button" type="button">取消</button>
+                <button id="imageTestStartBtn" class="primary-button" type="button">开始真实检测</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="./app.js"></script>
+  </body>
+</html>
