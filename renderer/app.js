@@ -109,7 +109,7 @@ const AUTO_LOGIN_STORAGE_KEY = "productImageStudioAutoLogin";
 const REMEMBER_INVITE_STORAGE_KEY = "productImageStudioRememberInvite";
 const ACTIVE_ROUTE_STORAGE_KEY = "productImageStudioRoute";
 const UPDATE_REMIND_LATER_STORAGE_KEY = "productImageStudioUpdateRemindLaterUntil";
-const RENDERER_BUILD_ID = "renderer-0.1.53-update-checker";
+const RENDERER_BUILD_ID = "renderer-0.1.54-ui-update-fixes";
 const PROMPT_SCOPE_KEYS = ["image", "aplus", "ai"];
 let progressHideTimer = null;
 let generationWatchdogTimer = null;
@@ -5586,7 +5586,7 @@ function openSettingsDrawer() {
   $("#grsaiBaseUrl").value = config.grsaiBaseUrl || config.imageBaseUrl || (isPresetImageProvider && Object.prototype.hasOwnProperty.call(imagePreset, "baseUrl") ? imagePreset.baseUrl : "");
   $("#grsaiApiKey").value = getSavedImageApiKey(config.imageProvider || "grsai") || config.grsaiApiKey || "";
   $("#grsaiConcurrency").value = Math.max(1, Math.min(10, Number(config.grsaiConcurrency || 6)));
-  if (els.updateManifestUrl) els.updateManifestUrl.value = config.updateManifestUrl || "";
+  if (els.updateManifestUrl) els.updateManifestUrl.value = config.updateManifestUrl || "https://raw.githubusercontent.com/hgh240627/product-image-studio/main/update.json";
   if (els.updateCheckOnStartup) els.updateCheckOnStartup.checked = config.updateCheckOnStartup !== false;
   setUpdateStatus("");
   syncPromptProviderUi();
@@ -6770,7 +6770,7 @@ async function saveSettings() {
     grsai1kModel: image1kModel || "gpt-image-2",
     grsai2kModel: image2kModel || "gpt-image-2-vip",
     grsaiConcurrency: Math.max(1, Math.min(10, Number($("#grsaiConcurrency").value || 6))),
-    updateManifestUrl: String(els.updateManifestUrl?.value || "").trim(),
+    updateManifestUrl: String(els.updateManifestUrl?.value || state.config?.updateManifestUrl || "https://raw.githubusercontent.com/hgh240627/product-image-studio/main/update.json").trim(),
     updateCheckOnStartup: els.updateCheckOnStartup ? els.updateCheckOnStartup.checked : true
   };
 

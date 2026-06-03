@@ -1,11 +1,13 @@
 {
-  "latestVersion": "0.1.53",
-  "title": "v0.1.53",
-  "summary": "此版本包含最新修复和优化。",
-  "downloadUrl": "https://github.com/hgh240627/product-image-studio/releases/download/v0.1.53/product-image-studio-0.1.53-Windows-x64.exe",
-  "releaseNotesUrl": "https://github.com/hgh240627/product-image-studio/releases/tag/v0.1.53",
+  "latestVersion": "0.1.54",
+  "title": "v0.1.54",
+  "summary": "修复安装版弹窗层级、更新入口可见性和生成失败卡片排版。",
+  "downloadUrl": "https://github.com/hgh240627/product-image-studio/releases/download/v0.1.54/product-image-studio-0.1.54-Windows-x64.exe",
+  "releaseNotesUrl": "https://github.com/hgh240627/product-image-studio/releases/tag/v0.1.54",
   "publishedAt": "2026-06-03",
   "notes": [
-    "请查看 GitHub Release 页面了解更新内容。"
+    "内置 GitHub 更新清单地址，新电脑安装后也能手动检查更新。",
+    "设置页更新入口移到外层，不再藏在折叠的作图 API 设置里。",
+    "隐藏顶部左侧功能导航说明，修复左下角总数显示和失败卡片错误信息溢出。"
   ]
 }

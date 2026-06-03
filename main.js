@@ -23,6 +23,7 @@ const APP_VERSION = (() => {
 })();
 const RUNTIME_BUILD_ID = `main-${APP_VERSION}-bg-ipc-v2`;
 const UPDATE_CHECK_TIMEOUT_MS = 12000;
+const DEFAULT_UPDATE_MANIFEST_URL = "https://raw.githubusercontent.com/hgh240627/product-image-studio/main/update.json";
 
 const DEFAULT_CONFIG = {
   promptProvider: "grsai-gemini",
@@ -60,7 +61,7 @@ const DEFAULT_CONFIG = {
   defaultRegion: "US",
   defaultLanguage: "English",
   defaultPlatform: "Amazon",
-  updateManifestUrl: "",
+  updateManifestUrl: DEFAULT_UPDATE_MANIFEST_URL,
   updateCheckOnStartup: true
 };
 
@@ -1273,7 +1274,9 @@ async function saveConfigForTest(config) {
     image2kModel: imageSettings.image2kModel,
     grsai1kModel: imageSettings.image1kModel,
     grsai2kModel: imageSettings.image2kModel,
-    trendProxyUrl: normalizeProxyUrl(config?.trendProxyUrl)
+    trendProxyUrl: normalizeProxyUrl(config?.trendProxyUrl),
+    updateManifestUrl: normalizeUpdateUrl(config?.updateManifestUrl || DEFAULT_UPDATE_MANIFEST_URL),
+    updateCheckOnStartup: config?.updateCheckOnStartup !== false
   };
   await writeJson(configPath(), next);
   return next;
@@ -1346,7 +1349,9 @@ async function getConfig() {
     imageProviderKeys: normalizeStringMap(merged.imageProviderKeys, normalizeImageProvider),
     imageProviderModels: normalizeStringArrayMap(merged.imageProviderModels, normalizeImageProvider),
     imageProviderLastModels: normalizeStringMap(merged.imageProviderLastModels, normalizeImageModelSlotKey),
-    featureImageModelRoutes: normalizeFeatureImageModelRoutes(merged.featureImageModelRoutes)
+    featureImageModelRoutes: normalizeFeatureImageModelRoutes(merged.featureImageModelRoutes),
+    updateManifestUrl: normalizeUpdateUrl(merged.updateManifestUrl || DEFAULT_UPDATE_MANIFEST_URL),
+    updateCheckOnStartup: merged.updateCheckOnStartup !== false
   };
 }
 

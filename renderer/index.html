@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>全自动套图生成</title>
-    <link rel="stylesheet" href="./styles.css?v=0.1.53-update-checker" />
+    <link rel="stylesheet" href="./styles.css?v=0.1.54-ui-update-fixes" />
   </head>
   <body>
     <div id="inviteGate" class="invite-gate">
@@ -470,6 +470,19 @@
             <small id="promptModelHint" class="field-hint">模型能力图标可手动开关，AI 分析会使用当前选中的模型。</small>
             <small id="promptApiActionStatus" class="field-hint"></small>
 
+            <div class="update-settings-card">
+              <div class="api-section-title">
+                <label class="field-label" for="updateManifestUrl">软件更新</label>
+                <button id="checkUpdateBtn" type="button" class="secondary-button compact-action">检查更新</button>
+              </div>
+              <input id="updateManifestUrl" type="url" placeholder="https://raw.githubusercontent.com/用户/仓库/main/update.json" />
+              <label class="checkbox-line update-check-line">
+                <input id="updateCheckOnStartup" type="checkbox" />
+                <span>启动时自动检查新版本</span>
+              </label>
+              <small id="updateActionStatus" class="field-hint"></small>
+            </div>
+
             <details class="legacy-image-settings">
               <summary>作图 API 与其他设置</summary>
 
@@ -536,19 +549,6 @@
           <small id="imageApiActionStatus" class="field-hint"></small>
           <label class="field-label" for="grsaiConcurrency">并发生图数量</label>
           <input id="grsaiConcurrency" type="number" min="1" max="10" step="1" />
-
-          <hr />
-
-          <label class="field-label" for="updateManifestUrl">更新清单地址（可选）</label>
-          <input id="updateManifestUrl" type="url" placeholder="https://example.com/product-image-studio/update.json" />
-          <label class="checkbox-line update-check-line">
-            <input id="updateCheckOnStartup" type="checkbox" />
-            <span>启动时自动检查新版本</span>
-          </label>
-          <div class="api-action-row">
-            <button id="checkUpdateBtn" type="button" class="secondary-button">检查更新</button>
-          </div>
-          <small id="updateActionStatus" class="field-hint"></small>
 
           <div class="drawer-actions">
             <button id="saveSettingsBtn" class="primary-button">保存设置</button>
@@ -1081,6 +1081,6 @@
         </div>
       </div>
     </div>
-    <script src="./app.js?v=0.1.53-update-checker"></script>
+    <script src="./app.js?v=0.1.54-ui-update-fixes"></script>
   </body>
 </html>

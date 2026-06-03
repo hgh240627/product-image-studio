@@ -2056,11 +2056,7 @@ body::before {
 }
 
 .side-nav-head {
-  width: 230px;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 10px;
-  padding: 0;
-  border-bottom: 0;
+  display: none;
 }
 
 .side-nav-mark {
@@ -6384,4 +6380,82 @@ hr {
   .ai-suggestion-row {
     display: none;
   }
+}
+
+/* v0.1.54: update visibility and compact failure/readout fixes */
+.side-nav-head {
+  display: none !important;
+}
+
+.update-settings-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(79, 191, 255, 0.24);
+  border-radius: 8px;
+  background: rgba(244, 249, 255, 0.82);
+}
+
+.update-settings-card .api-section-title {
+  margin: 0;
+}
+
+.update-settings-card .compact-action {
+  height: 32px;
+  min-width: 92px;
+}
+
+.task-total {
+  min-height: 40px;
+  margin-top: 10px;
+  border-radius: 8px;
+  padding: 0 10px;
+  gap: 10px;
+}
+
+.task-total span {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.task-total strong {
+  flex: 0 0 auto;
+  font-size: 20px;
+}
+
+.control-action-footer {
+  margin: auto -12px 0;
+  padding: 10px 12px 12px;
+}
+
+.control-action-footer .primary-button {
+  height: 54px;
+}
+
+.result-card-status {
+  place-items: stretch;
+}
+
+.result-status-box {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  padding: 14px;
+  text-align: left;
+  overflow: hidden;
+}
+
+.result-status-box strong {
+  color: #233955;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.result-status-box span {
+  min-height: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
