@@ -150,4 +150,46 @@ assert.doesNotMatch(wineAdapted, /\.{3}|…/, "final wine stopper prompt must no
 assert.match(wineAdapted, /red .*plug .*downward|red .*plug .*lower working end/i, "wine stopper prompt must lock red plug downward");
 assert.match(wineAdapted, /top press lever .*above|lever .*above/i, "wine stopper prompt must keep press lever above bottle mouth");
 
+const splashGuardPayload = {
+  productPackageMode: "single",
+  productInfo: [
+    "\u4ea7\u54c1\uff1a\u5355\u4e2a\u5706\u5f62\u534a\u900f\u660e\u6405\u62cc\u7897\u9632\u6e85\u76d6\uff0c\u5e26\u7ea2\u8272\u5f00\u5408\u7247\u3001\u4e2d\u5fc3\u6405\u62cc\u5668\u5165\u53e3\u3001\u4fa7\u8fb9\u63d0\u624b\u548c\u540c\u5fc3\u52a0\u5f3a\u7eb9\u3002",
+    "\u7528\u9014\uff1a\u7528\u4e8e\u5bb6\u5ead\u70d8\u7119\u6216\u53a8\u623f\u6405\u62cc\u65f6\u8986\u76d6\u7897\u53e3\uff0c\u51cf\u5c11\u9762\u7cca\u3001\u5976\u6cb9\u6216\u7c89\u7c7b\u5916\u6e85\uff0c\u5e76\u5141\u8bb8\u6405\u62cc\u5668\u4ece\u4e2d\u5fc3\u8fdb\u5165\u3002",
+    "\u6b63\u786e\u7528\u6cd5\uff1a\u5c06\u5706\u76d6\u5e73\u653e\u5728\u6405\u62cc\u7897\u53e3\uff0c\u5916\u5708\u5bf9\u9f50\u7897\u6cbf\uff1b\u63e1\u4fa7\u8fb9\u63d0\u624b\u62ff\u53d6\uff0c\u6405\u62cc\u5668\u53ef\u4ece\u4e2d\u5fc3\u67d4\u6027\u5b54\u8fdb\u5165\u6216\u7ea2\u8272\u7247\u4e2d\u95f4\u8fdb\u5165\u3002"
+  ].join("\n"),
+  packageInputs: {
+    unitOfSale: "\u5355\u4e2a\u4ea7\u54c1",
+    usageNotes: "\u5c06\u5706\u76d6\u5e73\u653e\u5728\u6405\u62cc\u7897\u53e3\uff0c\u5916\u5708\u5bf9\u9f50\u7897\u6cbf\uff1b\u6405\u62cc\u5668\u4ece\u4e2d\u5fc3\u67d4\u6027\u5b54\u6216\u7ea2\u8272\u5f00\u5408\u7247\u8fdb\u5165"
+  },
+  brand: {
+    platform: "Amazon",
+    region: "EU",
+    language: "English"
+  },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Round translucent mixing bowl splash guard lid with a red opening flap, center mixer entry port, star-shaped flexible slit, side handle, concentric raised reinforcing rings, and small raised dot texture.",
+  analysis: {
+    product_mechanism: "bag",
+    product_summary_zh: "old stale storage bag analysis",
+    unit_of_sale: "one large soft rectangular storage bag with zipper lid and sewn handles",
+    use_relationship: "the soft rectangular bag stands on a closet shelf; zipper follows the lid opening",
+    correct_use_method: "place the bag on a stable surface, open the zipper lid, put household soft goods inside, close the lid, and lift only by the sewn handles",
+    detail_focus_areas: ["boxy soft fabric body", "zipper lid seam", "webbing handles attached to side seams"],
+    part_function_map: ["zipper = opens and closes the top lid", "webbing handles = lifting points"],
+    forbidden_use_errors: ["do not detach handles from seams"]
+  }
+};
+
+const splashScenePrompt = buildCategoryPrompt(splashGuardPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+assert.doesNotMatch(splashScenePrompt, /storage bag|zipper lid|sewn handles|soft goods|closet/i, "local prompt must not inherit stale bag analysis when current facts do not support bag mechanics");
+
+const staleStorageDraft = [
+  "Create one realistic lifestyle usage image for an ecommerce detail path, with one short English title: \"Closet Storage\".",
+  "Correct use: place the bag on a stable surface, open the zipper lid, put household soft goods inside, close the lid, and lift only by the sewn handles."
+].join(" ");
+const splashAdapted = adaptImagePromptForModel(staleStorageDraft, "gpt-image-2", splashGuardPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+assert.doesNotMatch(splashAdapted, /Closet Storage|storage bag|zipper lid|sewn handles|soft goods|place the bag/i, "final prompt must drop unsupported stale storage-bag creative brief");
+assert.match(splashAdapted, /mixing bowl|splash guard|center mixer|red opening flap|side handle/i, "final prompt must keep the current product facts");
+
 console.log("prompt regression checks passed");

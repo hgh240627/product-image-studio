@@ -2659,11 +2659,23 @@ function mergeTextField(current, fallback) {
   return value || String(fallback || "").trim();
 }
 
-function mechanismSourceText(payload = {}, analysis = {}) {
+function operatorMechanismSourceText(payload = {}) {
+  const packageInputs = payload.packageInputs && typeof payload.packageInputs === "object" ? payload.packageInputs : {};
   return [
     payload.productInfo,
     payload.finalPrompt,
     payload.productName,
+    packageInputs.unitOfSale,
+    packageInputs.bundleComponents,
+    packageInputs.componentDifferences,
+    packageInputs.pcsCount,
+    packageInputs.packArrangement,
+    packageInputs.usageNotes
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function analysisMechanismSourceText(analysis = {}) {
+  return [
     analysis.product_summary_zh,
     analysis.final_prompt_en,
     analysis.unit_of_sale,
@@ -2677,8 +2689,80 @@ function mechanismSourceText(payload = {}, analysis = {}) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function mechanismSourceText(payload = {}, analysis = {}) {
+  return [
+    operatorMechanismSourceText(payload),
+    analysisMechanismSourceText(analysis)
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function hasMeaningfulOperatorFacts(text = "") {
+  const cleaned = String(text || "")
+    .replace(/\b(?:single|one|product|unit|unit of sale|auto|unknown)\b/gi, " ")
+    .replace(/[，。；：、,.;&=\/\s]+/g, " ")
+    .trim();
+  return cleaned.length >= 24;
+}
+
+function mechanismProfileSourceText(payload = {}, analysis = {}) {
+  const operatorSource = operatorMechanismSourceText(payload);
+  if (hasMeaningfulOperatorFacts(operatorSource)) return operatorSource;
+  return mechanismSourceText(payload, analysis);
+}
+
+function bagEvidencePattern() {
+  return /(?:\b(?:moving|storage|packing|laundry|duffel|tote|travel|zipper(?:ed)?|soft)\s+bags?\b|\bbags?\s+(?:with|for|to|that|and)\b|\b(?:zipper|zipped|webbing|sewn)\s+(?:lid|closure|handles?|straps?)\b|\u642c\u5bb6\u888b|\u6536\u7eb3\u888b|\u50a8\u7269\u888b|\u6536\u7eb3\u5305|\u62c9\u94fe\u888b|\u7ec7\u5e26\u63d0\u624b|\u884c\u674e\u888b|\u6574\u7406\u888b)/i;
+}
+
+function mechanismEvidencePattern(mechanism = "") {
+  const patterns = {
+    bag: bagEvidencePattern(),
+    cover: /\b(?:cover|lid|cap|guard|splash|splatter|bowl|plate|container)\b|[\u76d6\u7f69]|\u9632\u6e85|\u7897\u53e3|\u6405\u62cc/i,
+    elastic_cover: /\b(?:elastic|stretch|food\s+cover|bowl\s+cover|plate\s+cover)\b|\u5f39\u6027|\u677e\u7d27|\u4fdd\u9c9c|\u98df\u54c1\u7f69|\u7897\u7f69|\u76d8\u7f69/i,
+    rack: /\b(?:rack|holder|divider|slots?|shelf)\b|\u67b6|\u7f6e\u7269|\u6536\u7eb3|\u9694\u677f|\u7ad6\u69fd|\u5206\u9694/i,
+    organizer: /\b(?:organizer|storage|holder|shelf|drawer|cabinet|basket|rack)\b|\u6536\u7eb3|\u7f6e\u7269|\u6574\u7406|\u62bd\u5c49|\u67b6|\u76d2/i,
+    tool: /\b(?:tool|peeler|cutter|brush|scraper|knife|spatula|scissors|handle|blade)\b|\u5de5\u5177|\u5200|\u5237|\u94f2|\u522e|\u526a|\u624b\u67c4|\u6728\u67c4/i,
+    bottle_stopper: /\b(?:wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|sealing\s+plug|bottle\s+mouth)\b|\u9152\u74f6\u585e|\u7ea2\u9152\u585e|\u5c01\u53e3\u585e|\u74f6\u585e|\u74f6\u53e3/i,
+    electronics: /\b(?:phone|charger|cable|earbuds|headphones|speaker|lamp|led|camera|keyboard|mouse|adapter|usb|connector)\b|\u624b\u673a|\u5145\u7535|\u6570\u636e\u7ebf|\u8033\u673a|\u97f3\u7bb1|\u706f|\u76f8\u673a|\u952e\u76d8|\u9f20\u6807|\u63a5\u53e3/i,
+    apparel: /\b(?:shirt|dress|pants|leggings|socks|shoes|boots|slipper|jacket|coat|underwear|bra)\b|\u8863\u670d|\u88d9|\u88e4|\u889c|\u978b|\u5916\u5957|\u5185\u8863/i,
+    container: /\b(?:container|box|bin|jar|bottle|cup|bowl|tray)\b|\u5bb9\u5668|\u76d2|\u7bb1|\u74f6|\u676f|\u7897|\u6258\u76d8/i
+  };
+  return patterns[String(mechanism || "").trim()] || null;
+}
+
+function mechanismSupportedByOperatorFacts(mechanism = "", operatorSource = "") {
+  if (!hasMeaningfulOperatorFacts(operatorSource)) return true;
+  const pattern = mechanismEvidencePattern(mechanism);
+  if (!pattern) return true;
+  return pattern.test(operatorSource);
+}
+
+function promptForeignMechanicRules() {
+  return [
+    {
+      name: "storage/moving bag",
+      evidence: bagEvidencePattern(),
+      conflict: /\b(?:closet storage|wardrobe storage|storage bag|moving bag|packing bag|zipper lid|zippered lid|zipper closure|sewn handles?|webbing handles?|soft goods?|moving boxes?)\b|\u6536\u7eb3\u888b|\u50a8\u7269\u888b|\u62c9\u94fe|\u8863\u67dc\u6536\u7eb3|\u8f6f\u7269\u6536\u7eb3/i
+    }
+  ];
+}
+
+function unsupportedForeignMechanicConflict(prompt = "", factSource = "") {
+  const text = String(prompt || "");
+  if (!text.trim()) return null;
+  const facts = String(factSource || "");
+  for (const rule of promptForeignMechanicRules()) {
+    if (rule.conflict.test(text) && !rule.evidence.test(facts)) return rule.name;
+  }
+  return null;
+}
+
+function filterUnsupportedForeignMechanics(items, factSource = "") {
+  return normalizeStringList(items).filter((item) => !unsupportedForeignMechanicConflict(item, factSource));
+}
+
 function productMechanismProfile(payload = {}, analysis = {}) {
-  const source = mechanismSourceText(payload, analysis);
+  const source = mechanismProfileSourceText(payload, analysis);
   const profile = {
     product_mechanism: "",
     product_package_mode: "",
@@ -2708,7 +2792,7 @@ function productMechanismProfile(payload = {}, analysis = {}) {
     && /(?:cover|cap|bowl|plate|container|elastic|stretch|保鲜|罩|碗|盘|松紧)/i.test(source);
   const hasPeelerTool = /(?:peeler|peeling|julienne|serrated|comb[-\s]*like|comb\s+teeth|bottle\s+opener|open\s+slot|wood\s+handle|rivet|削皮|刨皮|刨丝|削皮刀|刨皮刀|木柄|铆钉|开瓶|梳齿|齿刃|锯齿)/i.test(source);
   const hasPressWineStopper = /(?:wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|press[-\s]*type|press\s+to\s+close|red\s+(?:cylindrical\s+)?plug|sealing\s+plug|stopper\s+lever|bottle\s+mouth|酒瓶塞|红酒塞|封口塞|瓶塞|按压式|按压手柄|红色塞|红色部分|瓶口)/i.test(source);
-  const hasMovingBag = /(?:moving\s+bag|storage\s+bag|packing\s+bag|large\s+storage|zipper|webbing\s+handle|搬家袋|收纳袋|储物袋|拉链|提手|织带|行李袋|整理袋)/i.test(source);
+  const hasMovingBag = bagEvidencePattern().test(source);
   const hasRackHolder = /(?:lid\s+rack|pot\s+lid\s+rack|plate\s+rack|cutting\s+board\s+rack|organizer\s+rack|vertical\s+divider|slots?|锅盖架|盖架|盘架|砧板架|置物架|收纳架|隔板|竖槽|分隔柱)/i.test(source);
 
   if (hasElasticFoodCover) {
@@ -2921,15 +3005,27 @@ function productMechanismProfile(payload = {}, analysis = {}) {
 
 function applyProductMechanismProfile(payload = {}, analysis = {}) {
   const profile = productMechanismProfile(payload, analysis);
-  if (!profile) return analysis;
+  const operatorSource = operatorMechanismSourceText(payload);
+  const currentMechanism = String(analysis.product_mechanism || "").trim();
+  const currentMechanismUnsupported = currentMechanism
+    && currentMechanism !== "unknown"
+    && !mechanismSupportedByOperatorFacts(currentMechanism, operatorSource);
+  if (!profile && !currentMechanismUnsupported) return analysis;
   const next = { ...analysis };
-  const currentMechanism = String(next.product_mechanism || "").trim();
-  const highConfidenceMechanisms = new Set(["elastic_cover", "rack"]);
-  if (!currentMechanism || currentMechanism === "unknown" || (highConfidenceMechanisms.has(profile.product_mechanism) && ["wrap", "cover", "sheet", "organizer", "accessory"].includes(currentMechanism))) {
+  const highConfidenceMechanisms = new Set(["elastic_cover", "rack", "bottle_stopper"]);
+  if (currentMechanismUnsupported) {
+    next.product_mechanism = profile?.product_mechanism || inferProductMechanism(operatorSource) || "unknown";
+    for (const key of ["product_summary_zh", "product_summary", "summary_zh", "final_prompt_en"]) {
+      if (unsupportedForeignMechanicConflict(next[key], operatorSource)) next[key] = "";
+    }
+  } else if (!currentMechanism || currentMechanism === "unknown" || (profile && highConfidenceMechanisms.has(profile.product_mechanism) && ["wrap", "cover", "sheet", "organizer", "accessory"].includes(currentMechanism))) {
     next.product_mechanism = profile.product_mechanism || currentMechanism;
   }
   for (const key of ["product_package_mode", "unit_of_sale", "unit_of_use", "use_relationship", "correct_use_method"]) {
-    next[key] = mergeTextField(next[key], profile[key]);
+    const current = currentMechanismUnsupported || unsupportedForeignMechanicConflict(next[key], operatorSource)
+      ? ""
+      : next[key];
+    next[key] = mergeTextField(current, profile?.[key]);
   }
   for (const key of [
     "key_action_frames",
@@ -2942,7 +3038,13 @@ function applyProductMechanismProfile(payload = {}, analysis = {}) {
     "forbidden_use_errors",
     "forbidden_use_errors_zh"
   ]) {
-    next[key] = uniqueMergedStringList(next[key], profile[key]);
+    const current = currentMechanismUnsupported
+      ? []
+      : filterUnsupportedForeignMechanics(next[key], operatorSource);
+    next[key] = uniqueMergedStringList(current, profile?.[key]);
+  }
+  if (currentMechanismUnsupported || unsupportedForeignMechanicConflict(JSON.stringify(next.regional_use_context || {}), operatorSource)) {
+    next.regional_use_context = normalizeRegionalUseContext(payload, { ...next, regional_use_context: {} });
   }
   return next;
 }
@@ -4832,7 +4934,8 @@ function grsaiGenerationReferenceSources(payload = {}, planItem = {}) {
 
 function grsaiReferenceLockText(payload = {}, planItem = {}, imageCount = 0) {
   const analysis = normalizeAnalysisResult(payload, payload.analysis || {});
-  const strategy = visualStrategyFromPayload(payload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
+  const normalizedPayload = { ...payload, analysis };
+  const strategy = visualStrategyFromPayload(normalizedPayload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
   const referenceInfo = grsaiGenerationReferenceSources(payload, planItem);
   if (!imageCount) {
     return "No product reference image was provided; use the product identity text conservatively and do not invent complex details.";
@@ -5489,9 +5592,9 @@ function inferProductMechanism(text) {
     ["rack", /\b(lid rack|pot lid rack|plate rack|cutting board rack|rack with slots|vertical divider)\b|锅盖架|盖架|盘架|砧板架|竖槽|分隔柱/],
     ["tool", /\b(tool|peeler|cutter|brush|scraper|knife|spatula|julienne|serrated|comb[-\s]*like|comb\s+teeth|bottle\s+opener|open\s+slot|wood\s+handle|rivet)\b|削皮|刨皮|刨丝|削皮刀|刨皮刀|木柄|铆钉|开瓶|梳齿|齿刃|锯齿/],
     ["bottle_stopper", /\b(wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|press[-\s]*type|press\s+to\s+close|red\s+(?:cylindrical\s+)?plug|sealing\s+plug|bottle\s+mouth)\b|酒瓶塞|红酒塞|封口塞|瓶塞|按压式|红色塞|瓶口/],
-    ["cover", /\b(cover|lid|food cover|cap)\b/],
+    ["cover", /\b(cover|lid|food cover|cap|guard|splash|splatter)\b|[\u76d6\u7f69]|\u9632\u6e85|\u7897\u53e3|\u6405\u62cc/],
     ["wrap", /\b(wrap|film|foil|cling)\b/],
-    ["bag", /\b(bag|pouch|sack|zip bag)\b/],
+    ["bag", bagEvidencePattern()],
     ["organizer", /\b(organizer|storage|holder|rack)\b/],
     ["container", /\b(container|box|bin|jar|bottle)\b/],
     ["tray", /\b(tray|pan|plate|dish)\b/],
@@ -6184,9 +6287,23 @@ function isInternalLocalPromptText(text = "") {
   return /Product fact card|Selected image category|Marketplace compliance guidance|Hard category boundary|Product fidelity lock|Final image prompt wording rule/i.test(String(text || ""));
 }
 
-function modelCreativeBrief(prompt = "") {
+function modelPromptFactSourceText(facts = {}) {
+  return [
+    facts.productFacts,
+    facts.identityLock,
+    facts.unitOfSale,
+    facts.useRelationship,
+    facts.correctUse,
+    facts.partFunctions,
+    facts.visibleParts,
+    facts.detailFocus
+  ].filter(Boolean).join(" ");
+}
+
+function modelCreativeBrief(prompt = "", facts = null) {
   const text = sanitizeFinalImagePromptText(prompt);
   if (!text || isInternalLocalPromptText(text)) return "";
+  if (facts && unsupportedForeignMechanicConflict(text, modelPromptFactSourceText(facts))) return "";
   return compactPromptText(text.replace(/\s+/g, " "), 320);
 }
 
@@ -6454,8 +6571,9 @@ function buildImagePromptProductFacts(payload = {}, analysis = {}, strategy = {}
 
 function modelPromptFacts(payload = {}, planItem = {}) {
   const analysis = normalizeAnalysisResult(payload, payload.analysis || {});
-  const strategy = visualStrategyFromPayload(payload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
-  const productFacts = buildImagePromptProductFacts(payload, analysis, strategy, 520);
+  const normalizedPayload = { ...payload, analysis };
+  const strategy = visualStrategyFromPayload(normalizedPayload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
+  const productFacts = buildImagePromptProductFacts(normalizedPayload, analysis, strategy, 520);
   const platform = normalizePlatformName(payload.brand?.platform || payload.platform || "Amazon");
   const palette = analysis.brand_palette || {};
   const font = analysis.brand_font_style || {};
@@ -6598,7 +6716,7 @@ function buildSkuImagePrompt(facts, style = "structured") {
 
 function buildOpenAiImagePrompt(basePrompt, facts) {
   const isWhiteBackground = facts.kind === "白底图";
-  const creativeBrief = modelCreativeBrief(basePrompt);
+  const creativeBrief = modelCreativeBrief(basePrompt, facts);
   const whiteLines = [
     `Create one ${facts.ratio || "1:1"} pure white-background product photograph for an ecommerce listing.`,
     facts.identityLock ? `Product identity lock: ${facts.identityLock}` : "",
@@ -6649,7 +6767,7 @@ function buildOpenAiImagePrompt(basePrompt, facts) {
 }
 
 function buildGeminiImagePrompt(basePrompt, facts) {
-  const creativeBrief = modelCreativeBrief(basePrompt);
+  const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
       "Scene goal: Pure white-background product-only image for ecommerce.",
@@ -6688,7 +6806,7 @@ function buildGeminiImagePrompt(basePrompt, facts) {
 }
 
 function buildFluxImagePrompt(basePrompt, facts) {
-  const creativeBrief = modelCreativeBrief(basePrompt);
+  const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
       "pure white-background ecommerce product photography",
@@ -6723,7 +6841,7 @@ function buildFluxImagePrompt(basePrompt, facts) {
 }
 
 function buildGenericImagePrompt(basePrompt, facts) {
-  const creativeBrief = modelCreativeBrief(basePrompt);
+  const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
       `Create one ${facts.kindLabel} for ecommerce.`,
@@ -6772,10 +6890,19 @@ function adaptImagePromptForModel(prompt, model, payload = {}, planItem = {}) {
     adapted = buildGenericImagePrompt(sanitizedBase, facts);
   }
 
-  return compactPromptText(
+  const finalPrompt = compactPromptText(
     sanitizeFinalImagePromptText(adapted),
     finalPromptMaxLengthForKind(facts.kind, profile)
   );
+  const operatorSource = operatorMechanismSourceText(payload);
+  const validationSource = hasMeaningfulOperatorFacts(operatorSource)
+    ? operatorSource
+    : modelPromptFactSourceText(facts);
+  const conflict = unsupportedForeignMechanicConflict(finalPrompt, validationSource);
+  if (conflict) {
+    throw new Error(`作图提示词与当前商品事实冲突：检测到未被商品事实支持的 ${conflict} 场景词。请重新运行 AI帮写或检查商品事实后再生成。`);
+  }
+  return finalPrompt;
 }
 
 function buildCategoryPrompt(payload, planItem) {
