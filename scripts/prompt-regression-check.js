@@ -107,7 +107,9 @@ assert.match(scenePrompt, /Scene-narrative grammar|Scene quality check/i, "scene
 const adapted = adaptImagePromptForModel(scenePrompt, "gpt-image-2", payload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.doesNotMatch(adapted, /Prompt profile:/i, "final image prompt should not expose internal prompt profile prefix");
 assert.match(adapted, /product after use|tool remains intact|target after use|produce skin/i, "final prompt must preserve product-after-use and target-after-use constraints");
-assert.match(adapted, /Prompt-case grammar|Commercial polish|Quality checklist/i, "final adapted prompt must carry quality grammar");
+assert.ok(adapted.length <= 1080, `final scene prompt must stay concise, got ${adapted.length} chars`);
+assert.match(adapted, /Reference product exactly|Correct relationship|Layout:|Style:|Avoid:/i, "final adapted prompt must keep the short final-prompt structure");
+assert.doesNotMatch(adapted, /Prompt-case grammar|Quality checklist|Product-only check|Geometry check/i, "final prompt must not expose bulky internal checklist labels");
 
 const wineStopperPayload = {
   productPackageMode: "single",
@@ -191,5 +193,14 @@ const staleStorageDraft = [
 const splashAdapted = adaptImagePromptForModel(staleStorageDraft, "gpt-image-2", splashGuardPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.doesNotMatch(splashAdapted, /Closet Storage|storage bag|zipper lid|sewn handles|soft goods|place the bag/i, "final prompt must drop unsupported stale storage-bag creative brief");
 assert.match(splashAdapted, /mixing bowl|splash guard|center mixer|red opening flap|side handle/i, "final prompt must keep the current product facts");
+assert.ok(splashAdapted.length <= 1080, `final splash-guard scene prompt must stay concise, got ${splashAdapted.length} chars`);
+
+const splashSkuPrompt = buildCategoryPrompt(splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
+const splashSkuAdapted = adaptImagePromptForModel(splashSkuPrompt, "gpt-image-2", splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
+assert.ok(splashSkuAdapted.length <= 820, `final splash-guard SKU prompt must stay concise, got ${splashSkuAdapted.length} chars`);
+assert.match(splashSkuAdapted, /SKU product photo|Reference product exactly|No visible text|Avoid:/i, "final SKU prompt must keep a compact ecommerce structure");
+assert.match(splashSkuAdapted, /Show purchase unit: one product unit/i, "Chinese single-unit input must become concise English purchase-unit wording");
+assert.doesNotMatch(splashSkuAdapted, /\?{2,}|[\u3400-\u9fff]/, "final SKU prompt must not leak Chinese text or placeholder question marks");
+assert.doesNotMatch(splashSkuAdapted, /Product identity:.*Product identity:|HEX color codes|palette legend|medical|safety certification|eco claims|non-toxic|BPA/i, "final SKU prompt must avoid repeated identity labels and bulky risky negative terms");
 
 console.log("prompt regression checks passed");

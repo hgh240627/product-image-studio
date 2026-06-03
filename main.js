@@ -4877,14 +4877,8 @@ function resolveGrsaiImageSize(model, resolution, ratio) {
 function aspectRatioInstruction(ratio, size) {
   const value = String(ratio || "1:1").trim() || "1:1";
   const [rawW, rawH] = value.split(":").map((item) => Number(item));
-  const shape = rawW && rawH
-    ? rawW === rawH
-      ? "square"
-      : rawW > rawH
-        ? "landscape"
-        : "portrait"
-    : "selected";
-  return `Canvas aspect ratio is a hard technical constraint: output exactly ${value} ${shape} composition at ${size}. Do not output a wider, taller, panoramic, cropped, letterboxed, or multi-panel image.`;
+  const shape = rawW && rawH && rawW === rawH ? "square" : rawW > rawH ? "landscape" : rawW < rawH ? "portrait" : "selected aspect";
+  return `${value} ${shape} image, ${size}.`;
 }
 
 function grsaiReferenceImageKind(value) {
@@ -4933,20 +4927,10 @@ function grsaiGenerationReferenceSources(payload = {}, planItem = {}) {
 }
 
 function grsaiReferenceLockText(payload = {}, planItem = {}, imageCount = 0) {
-  const analysis = normalizeAnalysisResult(payload, payload.analysis || {});
-  const normalizedPayload = { ...payload, analysis };
-  const strategy = visualStrategyFromPayload(normalizedPayload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
-  const referenceInfo = grsaiGenerationReferenceSources(payload, planItem);
   if (!imageCount) {
-    return "No product reference image was provided; use the product identity text conservatively and do not invent complex details.";
+    return "No product reference image: follow the written product facts conservatively.";
   }
-  return [
-    "Reference-image usage is mandatory:",
-    "Use the uploaded product image(s) as strict identity references for the product body.",
-    "Preserve every visible product part, count, silhouette, color, material, holes, teeth, screws/rivets, seams, cutouts, handle shape, labels, packaging, and included components.",
-    "Generate or change only the allowed background, lighting, camera crop, surface, hand/context, and category-specific layout around the product.",
-    categoryIdentityAllowance(planItem?.kind, strategy.identityLock || {})
-  ].filter(Boolean).join(" ");
+  return "Use the uploaded image only as the product identity reference; keep product shape, count, color, material, and visible parts unchanged.";
 }
 
 function summarizeGrsaiReferenceImages(images) {
@@ -5007,24 +4991,9 @@ function resolveImageConcurrency(config, total) {
 }
 
 function withNegativePrompt(prompt, negativePrompt) {
-  const builtInNegative = [
-    "visible HEX color codes",
-    "color palette legend",
-    "color swatch row",
-    "paint-chip labels",
-    "palette names printed in the image",
-    "design system spec sheet",
-    "physically impossible object intersections",
-    "handle passing through product",
-    "cover fused to pan handle",
-    "floating parts",
-    "wrong attachment point",
-    "warped product structure",
-    "watermark",
-    "fake brand logo"
-  ].join(", ");
-  const extraNegative = [negativePrompt, builtInNegative].filter(Boolean).join(", ");
-  return `${prompt}\n\nAvoid: ${extraNegative}`;
+  const extraNegative = compactAvoidText(negativePrompt, 4, 180);
+  if (!extraNegative) return prompt;
+  return `${prompt}\nAvoid: ${extraNegative}`;
 }
 
 const PLATFORM_RULES = {
@@ -6283,6 +6252,29 @@ function promptTextField(value = "", maxLength = 420) {
     .trim();
 }
 
+function compactAvoidText(value = "", maxItems = 6, maxLength = 260) {
+  const items = String(value || "")
+    .split(/[;,，、\n]+/)
+    .map((item) => promptTextField(item, 80))
+    .filter(Boolean);
+  return compactPromptText(Array.from(new Set(items)).slice(0, maxItems).join(", "), maxLength);
+}
+
+function compactPhraseList(value = "", maxLength = 240, maxItems = 8) {
+  const parts = String(value || "")
+    .split(/[;,，、。]+/)
+    .map((item) => promptTextField(item, 90))
+    .filter(Boolean);
+  if (!parts.length) return compactPromptText(value, maxLength);
+  const picked = [];
+  for (const part of Array.from(new Set(parts)).slice(0, maxItems)) {
+    const next = [...picked, part].join(", ");
+    if (next.length > maxLength) break;
+    picked.push(part);
+  }
+  return picked.length ? picked.join(", ") : compactPromptText(parts[0], maxLength);
+}
+
 function isInternalLocalPromptText(text = "") {
   return /Product fact card|Selected image category|Marketplace compliance guidance|Hard category boundary|Product fidelity lock|Final image prompt wording rule/i.test(String(text || ""));
 }
@@ -6338,45 +6330,33 @@ function modelSpecificTextPolicy(kind, platform) {
 }
 
 function finalPromptMaxLengthForKind(kind = "", profile = {}) {
-  if (kind === "白底图") return 1900;
-  if (kind === "SKU图") return 2000;
-  if (kind === "场景图") return Math.min(profile.maxLength || 2600, 2600);
-  if (kind === "卖点图") return Math.min(profile.maxLength || 2600, 2600);
-  if (kind === "高级A+") return Math.min(profile.maxLength || 2700, 2700);
-  return Math.min(profile.maxLength || 2500, 2500);
+  if (kind === "白底图") return 760;
+  if (kind === "SKU图") return 820;
+  if (kind === "场景图") return 1080;
+  if (kind === "卖点图") return 1080;
+  if (kind === "高级A+") return 1180;
+  return Math.min(profile.maxLength || 960, 960);
 }
 
 function modelSpecificAvoidText(kind, platform, negativePrompt = "") {
-  const shared = [
-    "marketplace names as text",
-    "fake logos or watermarks",
-    "unsupported claims or badges",
-    "price, discount, ranking, shipping, guarantee, certification",
-    "dimensions, capacity, temperature, percentages, technical measurements",
-    "color swatches, HEX codes, palette labels",
-    "object intersections, fused parts, floating parts, wrong attachments, warped structure",
-    "garbled text, misspelled text, unreadable labels, excessive copy, generic stock-photo props"
-  ];
+  const shared = ["watermarks/fake logos", "unsupported badges or claims", "distorted product", "extra product parts", "floating or fused objects"];
   if (kind === "SKU图") {
-    shared.push("props, decorative accessories, plants, cookware or host objects, food, hands, people, text, icons, labels, callouts, infographic layout, editorial poster treatment, repeated identical background across SKU images");
+    shared.push("props/hands/text/use scene");
   }
   if (kind === "白底图") {
-    shared.push("props, hands, host objects, room context, tabletop line, gradients, text, icons, background texture, decorative shadow scene");
+    shared.push("props/hands/scene/text");
   }
   if (kind === "卖点图") {
-    shared.push("multiple unrelated themes, dense infographic poster, feature list wall, fake specification table, too many icons, callouts covering the product, before-state showing the uploaded product broken");
+    shared.push("dense infographic, unrelated themes");
   }
   if (kind === "场景图") {
-    shared.push("infographic overlays, arrows, dense labels, long text blocks, wrong use action, wrong after-use state, product-only still life, staged catalog display");
+    shared.push("wrong use, wrong target object, dense labels");
   }
   if (kind === "高级A+") {
-    shared.push("random collage, many tiny panels, fake cross-sections, unsupported internal structure, dense paragraph layout, more than three callouts unless user explicitly asks");
+    shared.push("fake internals, crowded collage");
   }
-  if (platform === "Temu") {
-    shared.push("risky medical, safety, protection, waterproof, oilproof, heat-resistance, eco, non-toxic, free-from, child/baby/pregnancy wording");
-  }
-  if (negativePrompt) shared.push(negativePrompt);
-  return Array.from(new Set(shared.map((item) => String(item || "").trim()).filter(Boolean))).join("; ");
+  if (negativePrompt) shared.push(compactAvoidText(negativePrompt, 4, 140));
+  return compactAvoidText(shared.join(", "), 8, 260);
 }
 
 function conciseProductIdentityForImage(payload = {}, analysis = {}, strategy = {}, maxLength = 420) {
@@ -6601,7 +6581,7 @@ function modelPromptFacts(payload = {}, planItem = {}) {
     kindLabel: publicKindLabel(planItem.kind),
     module: planItem.module || "",
     productFacts,
-    unitOfSale: promptTextField(strategy.unitOfSale || analysis.unit_of_sale, 180),
+    unitOfSale: finalPromptUnitOfSale(payload.packageInputs?.unitOfSale || strategy.unitOfSale || analysis.unit_of_sale),
     useRelationship: promptTextField(strategy.useRelationship || analysis.use_relationship, 260),
     correctUse: promptTextField(strategy.correctUseMethod || analysis.correct_use_method, 220),
     interactionContract: strategy.interactionContract || analysis.interaction_contract || {},
@@ -6692,29 +6672,113 @@ function skuGeometrySummary(facts) {
   ].filter(Boolean).map(sentenceCaseLine).join(" ");
 }
 
-function buildSkuImagePrompt(facts, style = "structured") {
-  const background = cleanSkuBackgroundVariant(facts);
+function stripFinalPromptLabelPrefixes(value = "") {
+  return String(value || "")
+    .replace(/\b(?:Product identity|Subject|Exact product|Subject to preserve|Product fidelity|Visual summary|Unit of sale)\s*[:：]\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function finalPromptProductIdentity(facts = {}, maxLength = 280) {
+  const identity = compactPhraseList(stripFinalPromptLabelPrefixes(facts.productFacts || facts.identityLock || ""), Math.max(160, maxLength - 70), 6);
+  const visibleParts = compactPhraseList(stripFinalPromptLabelPrefixes(facts.visibleParts || facts.detailFocus || ""), 70, 3);
+  const combined = [identity, visibleParts && !identity.toLowerCase().includes(visibleParts.toLowerCase()) ? `Details: ${visibleParts}` : ""]
+    .filter(Boolean)
+    .join(". ");
+  return compactPromptText(combined, maxLength);
+}
+
+function finalPromptInteraction(facts = {}, maxLength = 280) {
+  const interaction = facts.interactionContract && typeof facts.interactionContract === "object" ? facts.interactionContract : {};
+  const compactContract = [
+    interaction.grip_area ? `grip: ${interaction.grip_area}` : "",
+    interaction.working_area ? `working part: ${interaction.working_area}` : "",
+    interaction.target_object ? `target: ${interaction.target_object}` : "",
+    interaction.contact_rule ? `contact: ${interaction.contact_rule}` : "",
+    interaction.product_state_after_use ? `product after use: ${interaction.product_state_after_use}` : "",
+    interaction.target_state_after_use ? `target after use: ${interaction.target_state_after_use}` : ""
+  ].filter(Boolean).join("; ");
+  return compactPromptText([
+    facts.useRelationship ? `Correct relationship: ${compactPhraseList(facts.useRelationship, 130, 3)}` : "",
+    facts.correctUse ? `Correct use: ${compactPhraseList(facts.correctUse, 140, 3)}` : "",
+    compactContract ? `Physical check: ${compactPhraseList(compactContract, 140, 4)}` : ""
+  ].filter(Boolean).join(" "), maxLength);
+}
+
+function finalPromptCopyRule(facts = {}) {
+  if (facts.kind === "SKU图" || facts.kind === "白底图") return "No visible text.";
+  if (facts.kind === "场景图") return "One short English title only.";
+  if (facts.kind === "卖点图") return "One short English benefit headline only if useful.";
+  if (facts.kind === "高级A+") return "One headline plus up to three short grounded callouts.";
+  return "Minimal English text only if useful.";
+}
+
+function finalPromptUnitOfSale(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/单个|單個|一个|一個|一件|single|one product|one unit/i.test(raw)) return "one product unit";
+  if (/套装|套裝|组合|組合|bundle|set|pack/i.test(raw)) return promptTextField(raw, 80).replace(/\?{2,}/g, "product bundle");
+  const normalized = promptTextField(raw, 80);
+  if (!normalized || /\?{2,}|[\u3400-\u9fff]/.test(normalized)) return "the complete purchase unit";
+  return normalized;
+}
+
+function finalPromptGoalLine(facts = {}) {
+  if (facts.kind === "白底图") return `${facts.ratio || "1:1"} pure white-background product image for ecommerce.`;
+  if (facts.kind === "SKU图") return `${facts.ratio || "1:1"} SKU product photo for ecommerce.`;
+  if (facts.kind === "场景图") return `${facts.ratio || "1:1"} realistic lifestyle usage image for ecommerce.`;
+  if (facts.kind === "卖点图") return `${facts.ratio || "1:1"} ecommerce selling-point image with one clear buyer benefit.`;
+  if (facts.kind === "高级A+") return `${facts.ratio || "1:1"} premium ecommerce detail-page module.`;
+  return `${facts.ratio || "1:1"} ecommerce product image.`;
+}
+
+function finalPromptLayoutLine(facts = {}) {
+  if (facts.kind === "白底图") {
+    return "Solid #FFFFFF background, full product visible, clean edges, accurate material and color, subtle contact shadow only if needed.";
+  }
+  if (facts.kind === "SKU图") {
+    return `Clean real product-photo surface, complete purchase unit fully visible and countable, no props or use action. ${facts.uniqueAngle || "Tidy centered composition with realistic shadow."}`;
+  }
+  if (facts.kind === "场景图") {
+    return `${facts.uniqueAngle || "Show a believable real-use action or fit proof at true scale."} Natural environment, realistic contact, product remains clearly recognizable.`;
+  }
+  if (facts.kind === "卖点图") {
+    return `${facts.uniqueAngle || "Show one visual proof of the benefit."} Clean information-card composition with generous negative space.`;
+  }
+  if (facts.kind === "高级A+") {
+    return `${facts.layoutFamily || "Detail annotation module"}: one dominant product/result visual, planned text zone, up to three grounded callouts.`;
+  }
+  return facts.uniqueAngle || "Clear product-led composition with realistic lighting.";
+}
+
+function buildShortFinalImagePrompt(basePrompt, facts) {
+  const identity = finalPromptProductIdentity(facts, facts.kind === "高级A+" ? 300 : 240);
+  const unitOfSale = finalPromptUnitOfSale(facts.unitOfSale);
+  const unit = unitOfSale ? `Show purchase unit: ${unitOfSale}.` : "";
+  const useLine = facts.kind === "SKU图" || facts.kind === "白底图" ? "" : finalPromptInteraction(facts, 250);
+  const creativeBrief = modelCreativeBrief(basePrompt, facts);
+  const layout = compactPromptText(finalPromptLayoutLine(facts), facts.kind === "高级A+" ? 230 : 220);
+  const style = compactPhraseList(facts.visualTone || "clean commercial photography, truthful material texture", 95, 2);
   const lines = [
-    `Create one ${facts.ratio || "1:1"} SKU product photograph for an ecommerce listing.`,
-    facts.identityLock ? `Product identity lock: ${facts.identityLock}` : "",
-    facts.productFacts ? `Subject: ${facts.productFacts}` : "",
-    facts.unitOfSale ? `Show exactly the complete purchase unit: ${facts.unitOfSale}` : "",
-    `Background: ${background}. It must look like a real clean product photo background, not a white-background cutout. Each SKU image in the set must use a different clean background, camera height, and shadow rhythm.`,
-    facts.compactVisualGrammar ? `Prompt-case grammar: ${facts.compactVisualGrammar}` : "",
-    facts.commercialPolish ? `Commercial polish: ${facts.commercialPolish}` : "",
-    facts.uniqueAngle ? `Camera and arrangement: ${facts.uniqueAngle}` : "Camera and arrangement: tidy product-only arrangement, fully visible and countable.",
-    "Composition: complete product centered or neatly arranged, no cropping, no usage action, no lifestyle context, no decorative styling, no extra included-looking items.",
-    "Lighting and material: realistic studio or natural product light, truthful shadows, accurate texture, crisp edges.",
-    `Product-only check: ${skuGeometrySummary(facts)}`,
-    `Text policy: ${facts.textPolicy}`,
-    `Avoid: ${facts.avoidText}`,
-    "Output one finished image only."
+    finalPromptGoalLine(facts),
+    identity ? `Reference product exactly: ${identity}.` : "",
+    unit,
+    creativeBrief && facts.kind !== "SKU图" && facts.kind !== "白底图" ? `Creative direction: ${creativeBrief}.` : "",
+    useLine ? sentenceCaseLine(useLine) : "",
+    `Layout: ${sentenceCaseLine(layout)}`,
+    `Style: ${sentenceCaseLine(style)}`,
+    `Text: ${finalPromptCopyRule(facts)}`,
+    `Avoid: ${sentenceCaseLine(facts.avoidText)}`
   ];
-  const prompt = lines.filter(Boolean).join(style === "compact" ? ". " : "\n");
-  return compactPromptText(sanitizeFinalImagePromptText(prompt), 2600);
+  return compactPromptText(sanitizeFinalImagePromptText(lines.filter(Boolean).join("\n")), finalPromptMaxLengthForKind(facts.kind));
+}
+
+function buildSkuImagePrompt(facts, style = "structured") {
+  return buildShortFinalImagePrompt("", facts);
 }
 
 function buildOpenAiImagePrompt(basePrompt, facts) {
+  return buildShortFinalImagePrompt(basePrompt, facts);
   const isWhiteBackground = facts.kind === "白底图";
   const creativeBrief = modelCreativeBrief(basePrompt, facts);
   const whiteLines = [
@@ -6767,6 +6831,7 @@ function buildOpenAiImagePrompt(basePrompt, facts) {
 }
 
 function buildGeminiImagePrompt(basePrompt, facts) {
+  return buildShortFinalImagePrompt(basePrompt, facts);
   const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
@@ -6806,6 +6871,7 @@ function buildGeminiImagePrompt(basePrompt, facts) {
 }
 
 function buildFluxImagePrompt(basePrompt, facts) {
+  return buildShortFinalImagePrompt(basePrompt, facts);
   const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
@@ -6841,6 +6907,7 @@ function buildFluxImagePrompt(basePrompt, facts) {
 }
 
 function buildGenericImagePrompt(basePrompt, facts) {
+  return buildShortFinalImagePrompt(basePrompt, facts);
   const creativeBrief = modelCreativeBrief(basePrompt, facts);
   if (facts.kind === "白底图") {
     return compactPromptText(sanitizeFinalImagePromptText([
