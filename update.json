@@ -1,13 +1,11 @@
 {
   "latestVersion": "0.1.53",
   "title": "v0.1.53",
-  "summary": "修复设置页弹窗层级问题，并加入 GitHub 自动发布更新流程。",
+  "summary": "此版本包含最新修复和优化。",
   "downloadUrl": "https://github.com/hgh240627/product-image-studio/releases/download/v0.1.53/product-image-studio-0.1.53-Windows-x64.exe",
   "releaseNotesUrl": "https://github.com/hgh240627/product-image-studio/releases/tag/v0.1.53",
   "publishedAt": "2026-06-03",
   "notes": [
-    "设置页内获取模型列表、检测结果和检测模型选择弹窗会显示在最前方。",
-    "加入 GitHub Actions 自动打包、发布 Release、生成 update.json。",
-    "加入更新清单脚本和层级回归检查。"
+    "请查看 GitHub Release 页面了解更新内容。"
   ]
 }
