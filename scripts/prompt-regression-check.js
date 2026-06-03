@@ -90,6 +90,7 @@ assert.equal(planItems.length, 5, "only manually selected allowed categories sho
 
 const skuPrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
 assert.match(skuPrompt, /exact complete purchase unit|Product consistency/i, "SKU prompt must lock complete purchase unit and product consistency");
+assert.match(skuPrompt, /Visual case-library quality layer|Brand-product photography grammar/i, "SKU prompt must include visual case grammar quality layer");
 assert.doesNotMatch(skuPrompt, new RegExp("Suite planning " + "layer|\\u4e3b\\u56fe|\\u667a\\u80fd\\u5339\\u914d", "i"), "category prompt must not contain suite planning layer or deleted categories");
 
 const whitePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_WHITE, variantIndex: 0, totalForKind: 1 });
@@ -97,13 +98,16 @@ assert.match(whitePrompt, /product retouch|#FFFFFF|no redesign/i, "white-backgro
 
 const sellPrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SELL, variantIndex: 0, totalForKind: 1 });
 assert.match(sellPrompt, /material texture|structure advantage|quantity value|one clear theme/i, "selling-point prompt must allow material, structure, and quantity value themes");
+assert.match(sellPrompt, /Information-card selling grammar|Selling-point quality check/i, "selling-point prompt must include information-card quality layer");
 
 const scenePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.match(scenePrompt, /short title|interaction contract|correct grip/i, "scene prompt must include short title and interaction contract");
+assert.match(scenePrompt, /Scene-narrative grammar|Scene quality check/i, "scene prompt must include scene-narrative quality layer");
 
 const adapted = adaptImagePromptForModel(scenePrompt, "gpt-image-2", payload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.doesNotMatch(adapted, /Prompt profile:/i, "final image prompt should not expose internal prompt profile prefix");
 assert.match(adapted, /product after use|tool remains intact|target after use|produce skin/i, "final prompt must preserve product-after-use and target-after-use constraints");
+assert.match(adapted, /Prompt-case grammar|Commercial polish|Quality checklist/i, "final adapted prompt must carry quality grammar");
 
 const wineStopperPayload = {
   productPackageMode: "single",

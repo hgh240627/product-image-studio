@@ -5111,10 +5111,10 @@ const PRODUCT_ONLY_VARIATION_RULES = [
 
 
 const SELLING_POINT_VARIATION_RULES = [
-  "Selling-point variation: outcome hero layout. Show the solved result as the main visual, product clearly responsible for it, with one compact benefit headline and no split-screen comparison.",
-  "Selling-point variation: use-action proof. Show an adult hand or realistic use action demonstrating the product solving one pain point, with a small callout zone and no before/after panel.",
+  "Selling-point variation: outcome hero information-card. Show the solved result as the main visual, product clearly responsible for it, with one compact benefit headline, generous negative space, and no split-screen comparison.",
+  "Selling-point variation: use-action proof card. Show an adult hand or realistic use action demonstrating the product solving one pain point, with one small callout zone and no before/after panel.",
   "Selling-point variation: problem callout layout. Show the pain as a small secondary callout or inset while the product-led image focuses on the product-enabled solved state; do not divide the canvas into equal left/right halves.",
-  "Selling-point variation: compact three-step visual flow. Use three small sequential cues such as pain, product action, result, with the result largest and most readable; no dense feature list.",
+  "Selling-point variation: compact three-step visual flow card. Use three small sequential cues such as pain, product action, result, with the result largest and most readable; no dense feature list.",
   "Selling-point variation: close product plus solved environment. Use a near product view with the surrounding target object visibly improved, supported by 1-2 simple icons only if they clarify the result.",
   "Selling-point variation: before/after comparison only for this variant. Use a restrained split or diagonal comparison with the product causing the improved result, not a repeated generic left-right template.",
   "Selling-point variation: buyer-result badge layout. Product and solved outcome dominate, with one simple low-risk result badge and clean negative space for short copy.",
@@ -5135,13 +5135,85 @@ const SCENE_VARIATION_RULES = [
 
 
 const A_PLUS_VARIATION_RULES = [
-  "A+ variation: left product/use image and right structured text block with one headline plus 1-3 grounded support points.",
+  "A+ variation: editorial detail-page section with left product/use image and right structured text block, one headline plus 1-3 grounded support points.",
   "A+ variation: hero product/result visual with 3 icon benefits, each tied to a visible product detail or buyer question.",
   "A+ variation: magnifier detail module pointing to one real structure/material detail, supported by short explanation text.",
   "A+ variation: step-by-step use strip with clear reading order, simple icons or numbers, and no unsupported claims.",
   "A+ variation: comparison mini-table or before/after module focused on one shopper decision, not a dense spec sheet.",
   "A+ variation: full-width detail-page banner with organized text zone and one coherent product story."
 ];
+
+function visualCaseGrammarFor(kind, planItem = {}, strategy = {}) {
+  const shared = [
+    "Visual case-library quality layer: use a proven prompt-case structure: exact subject, commercial role, composition, camera/lighting, material proof, text policy, and grouped avoid list.",
+    "Translate style tags into concrete visual instructions; never copy external prompt examples, never override the uploaded product facts, and never let style become more important than product truth."
+  ];
+  const kindRules = {
+    ["\u0053\u004b\u0055\u56fe"]: [
+      "Brand-product photography grammar: exact purchase-unit studio still life, catalog-level clarity, ordered geometry, accurate count, true color, premium material texture, realistic contact shadow, and no editorial props.",
+      "Use controlled product arrangement rather than a poster: clean background variation, complete edges, full purchase unit, and enough empty space for marketplace cropping."
+    ],
+    ["\u767d\u5e95\u56fe"]: [
+      "Retouch/cutout grammar: pure product isolation, crisp silhouette, balanced highlights, dust-free edge cleanup, true material finish, and no generated context.",
+      "The image should feel like a polished ecommerce product cutout, not a new product rendering or lifestyle composition."
+    ],
+    ["\u5356\u70b9\u56fe"]: [
+      "Information-card selling grammar: one large proof visual, one concise headline zone, one supporting cue or tiny phrase only if useful, clear negative space, and no dense specification sheet.",
+      "Choose one layout family only: outcome proof, structure detail, use-step card, restrained comparison, quantity-value card, or problem-result proof."
+    ],
+    ["\u573a\u666f\u56fe"]: [
+      "Scene-narrative grammar: believable real environment, natural camera distance, adult hand/action only if it clarifies use, correct scale, visible product-target relationship, and one short title.",
+      "The scene should answer where and how the product is used; avoid advertising collage, infographic overlay, or static product-only display."
+    ],
+    ["\u9ad8\u7ea7A+"]: [
+      "Detail-page module grammar: magazine-like brand-product hierarchy, one dominant visual proof, one planned text zone, up to three grounded callouts/icons/magnifier insets, and a clear reading path.",
+      "Pick a module structure that fits the selected A+ objective: detail annotation, material proof, use steps, comparison, set overview, scale guidance, or value story."
+    ]
+  };
+  const moduleLine = kind === "\u9ad8\u7ea7A+" && (planItem.module || planItem.sourceKind)
+    ? `Selected module style target: ${publicAplusModuleLabel(planItem.module || planItem.sourceKind)}.`
+    : "";
+  const mechanismLine = strategy.mechanism
+    ? `Product mechanism cue: ${strategy.mechanism}; use style only to clarify this mechanism.`
+    : "";
+  return [...shared, ...(kindRules[kind] || []), moduleLine, mechanismLine].filter(Boolean).join(" ");
+}
+
+function categoryPromptQualityChecklist(kind) {
+  const shared = [
+    "Final prompt checklist before returning: product identity is stated once; selected category role is unmistakable; composition/camera is concrete; lighting/material words are specific; physical relationship is explicit when any use action appears; text policy is clear; avoid list is short and grouped."
+  ];
+  const checks = {
+    ["\u0053\u004b\u0055\u56fe"]: "SKU quality check: the buyer can tell exactly what arrives, how many pieces/components are included, and nothing in the image looks included unless it belongs to the purchase unit.",
+    ["\u767d\u5e95\u56fe"]: "White-background quality check: pure #FFFFFF, full product visibility, crisp edges, accurate count, no tabletop line, no props, no scene, no redesign.",
+    ["\u5356\u70b9\u56fe"]: "Selling-point quality check: exactly one buyer reason, one visual proof format, restrained copy, no mixed themes, no unsupported claims, and product remains the cause of the result.",
+    ["\u573a\u666f\u56fe"]: "Scene quality check: real-life use, true scale, correct target object and contact rule, one short title, and no infographic clutter.",
+    ["\u9ad8\u7ea7A+"]: "A+ quality check: one complete detail-page module, readable hierarchy, every callout tied to visible product proof, and no fake specs or dense paragraphs."
+  };
+  return [...shared, checks[kind]].filter(Boolean).join(" ");
+}
+
+function commercialPolishForKind(kind) {
+  const polish = {
+    ["\u0053\u004b\u0055\u56fe"]: "premium product catalog photography, ordered arrangement, tactile material clarity, realistic studio shadow, clean crop safety.",
+    ["\u767d\u5e95\u56fe"]: "high-end ecommerce retouch, clean silhouette, accurate color, subtle dimensional lighting, no context.",
+    ["\u5356\u70b9\u56fe"]: "clean information-card layout, thumbnail-readable hierarchy, product-led proof visual, one concise benefit message, refined empty space.",
+    ["\u573a\u666f\u56fe"]: "natural lifestyle photography, believable daily-use context, true scale, practical surroundings, soft commercial light.",
+    ["\u9ad8\u7ea7A+"]: "premium detail-page design, magazine-like hierarchy, clear text zone, restrained icon/callout system, product proof first."
+  };
+  return polish[kind] || "clean ecommerce visual hierarchy, accurate product identity, realistic light, and controlled clutter.";
+}
+
+function compactVisualGrammarForKind(kind) {
+  const grammar = {
+    ["\u0053\u004b\u0055\u56fe"]: "brand-product studio catalog grammar: ordered geometry, countable purchase unit, true color, realistic shadow, tactile material.",
+    ["\u767d\u5e95\u56fe"]: "premium retouch/cutout grammar: pure #FFFFFF isolation, crisp silhouette, accurate color, clean edge, truthful material.",
+    ["\u5356\u70b9\u56fe"]: "information-card grammar: one proof visual, one short headline zone, one buyer reason, clean negative space.",
+    ["\u573a\u666f\u56fe"]: "scene-narrative grammar: real environment, true scale, natural camera distance, correct product-target relationship, one short title.",
+    ["\u9ad8\u7ea7A+"]: "detail-page module grammar: dominant proof visual, planned text zone, up to three grounded callouts, clear reading path."
+  };
+  return grammar[kind] || "clean ecommerce prompt grammar: exact subject, clear role, concrete composition, realistic light, grouped avoid list.";
+}
 
 
 
@@ -5173,7 +5245,8 @@ function countDrivenRule(planItem) {
 function professionalQualityRule(kind) {
   const shared = [
     "Professional ecommerce image quality gate: the finished image must answer one shopper question at a glance, keep the product identity accurate, and remain readable as a marketplace thumbnail.",
-    "Use visual hierarchy deliberately: one primary subject, one support idea, controlled empty space, realistic shadows/reflections, and no accidental clutter."
+    "Use visual hierarchy deliberately: one primary subject, one support idea, controlled empty space, realistic shadows/reflections, and no accidental clutter.",
+    "Apply commercial prompt-case discipline: subject, role, composition, lighting, material proof, text policy, and avoid list must all be explicit."
   ];
   const byKind = {
     ["\u0053\u004b\u0055\u56fe"]: "Primary shopper question: which exact variant, bundle, or PCS purchase unit will I receive? Prioritize countable components, true colors, accurate arrangement, and clean real-shot texture.",
@@ -6150,9 +6223,10 @@ function modelSpecificTextPolicy(kind, platform) {
 function finalPromptMaxLengthForKind(kind = "", profile = {}) {
   if (kind === "白底图") return 1900;
   if (kind === "SKU图") return 2000;
-  if (kind === "场景图") return 2200;
-  if (kind === "卖点图") return 2300;
-  return Math.min(profile.maxLength || 2300, 2300);
+  if (kind === "场景图") return Math.min(profile.maxLength || 2600, 2600);
+  if (kind === "卖点图") return Math.min(profile.maxLength || 2600, 2600);
+  if (kind === "高级A+") return Math.min(profile.maxLength || 2700, 2700);
+  return Math.min(profile.maxLength || 2500, 2500);
 }
 
 function modelSpecificAvoidText(kind, platform, negativePrompt = "") {
@@ -6163,16 +6237,23 @@ function modelSpecificAvoidText(kind, platform, negativePrompt = "") {
     "price, discount, ranking, shipping, guarantee, certification",
     "dimensions, capacity, temperature, percentages, technical measurements",
     "color swatches, HEX codes, palette labels",
-    "object intersections, fused parts, floating parts, wrong attachments, warped structure"
+    "object intersections, fused parts, floating parts, wrong attachments, warped structure",
+    "garbled text, misspelled text, unreadable labels, excessive copy, generic stock-photo props"
   ];
   if (kind === "SKU图") {
-    shared.push("props, decorative accessories, plants, cookware or host objects, food, hands, people, text, icons, labels, callouts, infographic layout, repeated identical background across SKU images");
+    shared.push("props, decorative accessories, plants, cookware or host objects, food, hands, people, text, icons, labels, callouts, infographic layout, editorial poster treatment, repeated identical background across SKU images");
   }
   if (kind === "白底图") {
-    shared.push("props, hands, host objects, room context, tabletop line, gradients, text, icons");
+    shared.push("props, hands, host objects, room context, tabletop line, gradients, text, icons, background texture, decorative shadow scene");
+  }
+  if (kind === "卖点图") {
+    shared.push("multiple unrelated themes, dense infographic poster, feature list wall, fake specification table, too many icons, callouts covering the product, before-state showing the uploaded product broken");
   }
   if (kind === "场景图") {
-    shared.push("infographic overlays, arrows, dense labels, long text blocks, wrong use action, wrong after-use state");
+    shared.push("infographic overlays, arrows, dense labels, long text blocks, wrong use action, wrong after-use state, product-only still life, staged catalog display");
+  }
+  if (kind === "高级A+") {
+    shared.push("random collage, many tiny panels, fake cross-sections, unsupported internal structure, dense paragraph layout, more than three callouts unless user explicitly asks");
   }
   if (platform === "Temu") {
     shared.push("risky medical, safety, protection, waterproof, oilproof, heat-resistance, eco, non-toxic, free-from, child/baby/pregnancy wording");
@@ -6423,6 +6504,10 @@ function modelPromptFacts(payload = {}, planItem = {}) {
     brandApplication: promptTextField(payload.brand?.customStyle || palette.usage_en || "", 220),
     avoidRepetition: Number(planItem.totalForKind || 1) > 1 ? "Use a different buyer angle, background, camera distance, and message from other images of the same category." : "",
     visualTone: promptTextField(payload.brand?.customStyle || "clean commercial ecommerce, product-led, truthful material texture", 180),
+    commercialPolish: commercialPolishForKind(planItem.kind),
+    visualCaseGrammar: visualCaseGrammarFor(planItem.kind, planItem, strategy),
+    compactVisualGrammar: compactVisualGrammarForKind(planItem.kind),
+    promptQualityChecklist: categoryPromptQualityChecklist(planItem.kind),
     palette: promptTextField([palette.primary_color, palette.secondary_color, palette.accent_color, palette.background_color].filter(Boolean).join(" / "), 160),
     typography: promptTextField(font.style_en || "clean readable short copy where allowed", 160),
     ratio: resolveGenerationRatio(payload, planItem),
@@ -6497,6 +6582,8 @@ function buildSkuImagePrompt(facts, style = "structured") {
     facts.productFacts ? `Subject: ${facts.productFacts}` : "",
     facts.unitOfSale ? `Show exactly the complete purchase unit: ${facts.unitOfSale}` : "",
     `Background: ${background}. It must look like a real clean product photo background, not a white-background cutout. Each SKU image in the set must use a different clean background, camera height, and shadow rhythm.`,
+    facts.compactVisualGrammar ? `Prompt-case grammar: ${facts.compactVisualGrammar}` : "",
+    facts.commercialPolish ? `Commercial polish: ${facts.commercialPolish}` : "",
     facts.uniqueAngle ? `Camera and arrangement: ${facts.uniqueAngle}` : "Camera and arrangement: tidy product-only arrangement, fully visible and countable.",
     "Composition: complete product centered or neatly arranged, no cropping, no usage action, no lifestyle context, no decorative styling, no extra included-looking items.",
     "Lighting and material: realistic studio or natural product light, truthful shadows, accurate texture, crisp edges.",
@@ -6518,6 +6605,8 @@ function buildOpenAiImagePrompt(basePrompt, facts) {
     facts.productFacts ? `Subject: ${facts.productFacts}` : "",
     facts.unitOfSale ? `Show exactly: ${facts.unitOfSale}` : "",
     "Background: solid opaque #FFFFFF only. No tabletop, countertop, surface line, room, gradient, texture, props, hands, cookware, food, packaging not included in the sale, icons, labels, callouts, or text.",
+    facts.compactVisualGrammar ? `Prompt-case grammar: ${facts.compactVisualGrammar}` : "",
+    facts.commercialPolish ? `Commercial polish: ${facts.commercialPolish}` : "",
     facts.uniqueAngle ? `Camera: ${facts.uniqueAngle}` : "Camera: centered product-only view, slight three-quarter or elevated angle only if it clarifies real shape.",
     "Composition: product centered, fully visible, not cropped, clean silhouette, enough white margin, realistic contact shadow only if needed to ground the object.",
     "Lighting and material: crisp commercial product lighting, accurate color, matte/gloss texture preserved, sharp edges, no redesign.",
@@ -6541,14 +6630,17 @@ function buildOpenAiImagePrompt(basePrompt, facts) {
     !facts.identityLock && facts.productFacts ? `Product fidelity: ${facts.productFacts}` : "",
     facts.unitOfSale ? `Show the real unit of sale: ${facts.unitOfSale}` : "",
     facts.categoryInstruction ? `Image-type rule: ${facts.categoryInstruction}` : "",
+    facts.compactVisualGrammar ? `Prompt-case grammar: ${facts.compactVisualGrammar}` : "",
+    facts.commercialPolish ? `Commercial polish: ${facts.commercialPolish}` : "",
+    `Physical realism: ${physicalRelationshipSummary(facts)}`,
     facts.uniqueAngle || facts.layoutFamily || facts.sceneFamily
       ? `Composition: ${[facts.uniqueAngle, facts.layoutFamily, facts.sceneFamily].filter(Boolean).join("; ")}`
       : "",
-    facts.backgroundFamily || facts.visualTone || facts.palette
-      ? `Visual direction: ${[facts.backgroundFamily, facts.visualTone, facts.palette, facts.brandApplication].filter(Boolean).join("; ")}`
+    facts.backgroundFamily || facts.visualTone || facts.brandApplication
+      ? `Visual direction: ${[facts.backgroundFamily, facts.visualTone, facts.brandApplication].filter(Boolean).join("; ")}`
       : "",
-    `Physical realism: ${physicalRelationshipSummary(facts)}`,
     `Text policy: ${facts.textPolicy}`,
+    facts.promptQualityChecklist ? `Quality checklist: ${facts.promptQualityChecklist}` : "",
     facts.avoidRepetition ? `Set diversity: ${facts.avoidRepetition}` : "",
     `Avoid: ${facts.avoidText}`,
     "Output one finished image only."
@@ -6582,8 +6674,10 @@ function buildGeminiImagePrompt(basePrompt, facts) {
     ["Action and object relationships", physicalRelationshipSummary(facts)],
     ["Final check", "Make every visible object physically plausible and keep the product identity unchanged from the references."],
     ["Composition", [facts.role, facts.uniqueAngle, facts.layoutFamily, facts.sceneFamily, facts.backgroundFamily].filter(Boolean).join("; ")],
-    ["Style and lighting", [facts.visualTone, facts.palette, facts.brandApplication, "realistic commercial lighting, truthful material texture, clean hierarchy"].filter(Boolean).join("; ")],
+    ["Style and lighting", [facts.visualTone, facts.commercialPolish, facts.palette, facts.brandApplication, "realistic commercial lighting, truthful material texture, clean hierarchy"].filter(Boolean).join("; ")],
+    ["Prompt-case grammar", facts.compactVisualGrammar],
     ["Text", facts.textPolicy],
+    ["Quality checklist", facts.promptQualityChecklist],
     ["Avoid", facts.avoidText]
   ];
   const prompt = sections
@@ -6619,7 +6713,8 @@ function buildFluxImagePrompt(basePrompt, facts) {
     facts.categoryInstruction ? `image rule: ${facts.categoryInstruction}` : "",
     facts.useRelationship ? `correct use relationship: ${facts.useRelationship}` : "",
     facts.backgroundFamily ? `background: ${facts.backgroundFamily}` : "",
-    facts.visualTone || facts.palette ? `style: ${[facts.visualTone, facts.palette].filter(Boolean).join(", ")}` : "",
+    facts.visualTone || facts.palette || facts.commercialPolish ? `style: ${[facts.visualTone, facts.commercialPolish, facts.palette].filter(Boolean).join(", ")}` : "",
+    facts.compactVisualGrammar ? `prompt grammar: ${facts.compactVisualGrammar}` : "",
     "realistic shadows, truthful materials, sharp product detail, clean commercial hierarchy",
     `text: ${facts.textPolicy}`,
     `avoid: ${facts.avoidText}`
@@ -6651,9 +6746,11 @@ function buildGenericImagePrompt(basePrompt, facts) {
     facts.categoryInstruction ? `Image-type rule: ${facts.categoryInstruction}` : "",
     facts.uniqueAngle || facts.layoutFamily ? `Use this image role and layout: ${[facts.role, facts.uniqueAngle, facts.layoutFamily].filter(Boolean).join("; ")}` : "",
     facts.sceneFamily || facts.backgroundFamily ? `Scene/background: ${[facts.sceneFamily, facts.backgroundFamily].filter(Boolean).join("; ")}` : "",
-    facts.visualTone || facts.palette ? `Style: ${[facts.visualTone, facts.palette, facts.brandApplication].filter(Boolean).join("; ")}` : "",
     `Physical plausibility: ${physicalRelationshipSummary(facts)}`,
+    facts.visualTone || facts.palette || facts.commercialPolish ? `Style: ${[facts.visualTone, facts.commercialPolish, facts.palette, facts.brandApplication].filter(Boolean).join("; ")}` : "",
+    facts.compactVisualGrammar ? `Prompt-case grammar: ${facts.compactVisualGrammar}` : "",
     `Text policy: ${facts.textPolicy}`,
+    facts.promptQualityChecklist ? `Quality checklist: ${facts.promptQualityChecklist}` : "",
     `Avoid: ${facts.avoidText}`,
     "Output one image only."
   ].filter(Boolean).join("\n");
@@ -6704,6 +6801,9 @@ function buildCategoryPrompt(payload, planItem) {
   const fidelityRule = productFidelityRule(strategy, planItem.kind);
   const boundaryRule = categoryBoundaryRule(planItem.kind);
   const qualityRule = professionalQualityRule(planItem.kind);
+  const visualCaseGrammar = visualCaseGrammarFor(planItem.kind, planItem, strategy);
+  const promptQualityChecklist = categoryPromptQualityChecklist(planItem.kind);
+  const commercialPolish = commercialPolishForKind(planItem.kind);
   const plausibilityRule = physicalPlausibilityAuditRule(payloadWithNormalizedAnalysis, planItem);
   const quantityRule = countDrivenRule(planItem);
   const productFactCard = buildProductFactCard(payloadWithNormalizedAnalysis, payloadWithNormalizedAnalysis.analysis, 900);
@@ -6740,6 +6840,9 @@ function buildCategoryPrompt(payload, planItem) {
     `Selected image category: ${planItem.kind}.`,
     boundaryRule,
     qualityRule,
+    visualCaseGrammar,
+    commercialPolish,
+    promptQualityChecklist,
     quantityRule,
     rules.base,
     rules.scene,
@@ -6778,6 +6881,9 @@ function buildCategoryPromptRewriteUserText(items, imageModel = "") {
     "Selling-point image may focus on material, structure, function, use step, pain/result, bundle value, or quantity value, but each prompt must express only one theme.",
     "Lifestyle usage image must include one short English title and correct product usage relationship.",
     "Detail annotation belongs to Advanced A+ as a detail annotation module, not as a standalone macro image type.",
+    "Apply the visual case-library quality layer from the local prompt. Treat it as abstract visual grammar only: exact subject, commercial role, composition, camera/lighting, material proof, text policy, and grouped avoid list. Do not copy external examples or invent a fixed style unrelated to the product.",
+    "For every final prompt, include enough concrete visual grammar for the selected category: SKU = brand-product studio catalog proof; white background = premium retouch/cutout; selling-point = clean information-card proof; scene = realistic usage narrative; A+ = detail-page module hierarchy.",
+    "Before returning, check that each final prompt has product identity, category role, composition, lighting/material, physical relationship when needed, text policy, and short grouped avoid list.",
     "Improve product-specific clarity, visual specificity, and variation. Every returned prompt in this chunk must be visibly different in buyer question, setting, camera distance, layout family, product scale, text/no-text policy, and marketing role from the others unless the category explicitly requires pure product isolation.",
     "Do not add unsupported product features, wrong use cases, fake badges, watermarks, pricing, discounts, certification marks, or unsafe claims.",
     "Return every requested index exactly once. If you cannot complete all prompts, still return JSON with an error field explaining why.",
