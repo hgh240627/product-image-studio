@@ -6459,3 +6459,63 @@ hr {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* v0.1.55: keep ratio choices, total count, and the generate action visually separated. */
+.ratio-section {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.ratio-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ratio-section-head .field-label {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.ratio-section .task-total {
+  width: auto;
+  min-height: 30px;
+  margin: 0;
+  padding: 0 9px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(47, 128, 237, 0.1), rgba(79, 191, 255, 0.08)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.ratio-section .task-total span {
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ratio-section .task-total strong {
+  min-width: 18px;
+  font-size: 17px;
+  line-height: 1;
+  text-align: right;
+}
+
+.ratio-section .ratio-grid {
+  min-height: 0;
+}
+
+.ratio-section .ratio-grid button {
+  min-height: 36px;
+  height: 36px;
+}
+
+.control-action-footer {
+  padding-top: 12px;
+}

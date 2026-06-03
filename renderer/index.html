@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>全自动套图生成</title>
-    <link rel="stylesheet" href="./styles.css?v=0.1.54-ui-update-fixes" />
+    <link rel="stylesheet" href="./styles.css?v=0.1.55-ratio-total-layout" />
   </head>
   <body>
     <div id="inviteGate" class="invite-gate">
@@ -235,19 +235,22 @@
             </select>
           </div>
 
-          <label class="field-label">生成比例</label>
-          <div class="ratio-grid" id="ratioGroup">
-            <button data-value="1:1" class="active">1:1</button>
-            <button data-value="3:4">3:4</button>
-            <button data-value="4:3">4:3</button>
-            <button data-value="2:3">2:3</button>
-            <button data-value="3:2">3:2</button>
-            <button data-value="16:9">16:9</button>
-          </div>
-
-          <div class="task-total">
-            <span>本次总图数</span>
-            <strong id="totalCountValue">4</strong>
+          <div class="ratio-section">
+            <div class="ratio-section-head">
+              <label class="field-label">生成比例</label>
+              <div class="task-total">
+                <span>本次总图数</span>
+                <strong id="totalCountValue">4</strong>
+              </div>
+            </div>
+            <div class="ratio-grid" id="ratioGroup">
+              <button data-value="1:1" class="active">1:1</button>
+              <button data-value="3:4">3:4</button>
+              <button data-value="4:3">4:3</button>
+              <button data-value="2:3">2:3</button>
+              <button data-value="3:2">3:2</button>
+              <button data-value="16:9">16:9</button>
+            </div>
           </div>
           <div class="control-action-footer">
             <button id="generateBtn" class="primary-button">生成图片</button>
@@ -1081,6 +1084,6 @@
         </div>
       </div>
     </div>
-    <script src="./app.js?v=0.1.54-ui-update-fixes"></script>
+    <script src="./app.js?v=0.1.55-ratio-total-layout"></script>
   </body>
 </html>

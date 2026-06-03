@@ -2,7 +2,7 @@
 
 项目已经配置好 GitHub Actions。仓库连接到 GitHub 后，每次推送版本标签都会自动完成：
 
-1. 检查标签版本是否等于 `package.json` 的版本，例如 `v0.1.53`。
+1. 检查标签版本是否等于 `package.json` 的版本，例如 `v0.1.55`。
 2. 运行 `npm run check`。
 3. 打包 Windows 安装包和 zip。
 4. 创建或更新 GitHub Release。
@@ -72,10 +72,10 @@ git push -u origin main
 
 ```powershell
 git add .
-git commit -m "Release v0.1.53"
-git tag v0.1.53
+git commit -m "Release v0.1.55"
+git tag v0.1.55
 git push origin main
-git push origin v0.1.53
+git push origin v0.1.55
 ```
 
 GitHub Actions 跑完后，`update.json` 会自动更新。以后软件启动时会读取这个地址，发现新版本就弹出更新提醒。
