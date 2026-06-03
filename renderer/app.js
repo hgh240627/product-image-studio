@@ -14,37 +14,92 @@ const state = {
   resolution: "1K",
   ratio: "1:1",
   imageModelRoute: "auto",
+  featureImageModelRoutes: {
+    aplus: "auto"
+  },
   imageModelTier: "standard",
   referenceStrategy: "auto",
   suitePlan: null,
   promptPlan: [],
   selectedResultIndex: -1,
+  viewResults: {
+    image: [],
+    aplus: []
+  },
+  viewSelectedResultIndex: {
+    image: -1,
+    aplus: -1
+  },
+  viewLiveCompletedCount: {
+    image: 0,
+    aplus: 0
+  },
+  viewLiveTotalCount: {
+    image: 0,
+    aplus: 0
+  },
+  viewLiveProgressByIndex: {
+    image: {},
+    aplus: {}
+  },
+  viewSuitePlan: {
+    image: null,
+    aplus: null
+  },
+  viewPromptPlan: {
+    image: [],
+    aplus: []
+  },
   autoFilledProductInfo: "",
   productFactsReviewPending: false,
   lastAnalyzedProductFacts: "",
   repairHasMarks: false,
   productPackageMode: "single",
+  suiteMode: "custom",
   kindCounts: {
-    主图: 0,
-    SKU图: 0,
-    卖点图: 0,
-    白底图: 0,
-    场景图: 0,
-    特写图: 0,
-    "高级A+": 0
+    白底图: 1,
+    SKU图: 1,
+    场景图: 2,
+    卖点图: 2,
+    "A+/细节标注图": 0
   },
   aPlusSize: "970x300",
+  activeGenerationView: "image",
   activeGenerationId: null,
+  activeGenerationStartedAt: 0,
+  lastGenerationProgressAt: 0,
+  generationProgressReceived: false,
+  generationScopeById: {},
+  generationFinishResolvers: {},
   liveResults: [],
   liveCompletedCount: 0,
   liveTotalCount: 0,
   liveProgressByIndex: {},
+  workflowSteps: [],
   analysis: null,
   route: "image",
+  ai: {
+    mode: "chat",
+    imageModelRoute: "auto",
+    images: [],
+    files: [],
+    messages: []
+  },
+  update: {
+    latest: null,
+    checking: false
+  },
   title: {
     platform: "Amazon",
     productPackageMode: "single",
     result: null
+  },
+  aplus: {
+    images: [],
+    analysis: null,
+    productName: "",
+    productInfo: "",
+    format: "970x600"
   }
 };
 
@@ -53,6 +108,276 @@ const INVITE_STORAGE_KEY = "productImageStudioInvite";
 const AUTO_LOGIN_STORAGE_KEY = "productImageStudioAutoLogin";
 const REMEMBER_INVITE_STORAGE_KEY = "productImageStudioRememberInvite";
 const ACTIVE_ROUTE_STORAGE_KEY = "productImageStudioRoute";
+const UPDATE_REMIND_LATER_STORAGE_KEY = "productImageStudioUpdateRemindLaterUntil";
+const RENDERER_BUILD_ID = "renderer-0.1.53-update-checker";
+const PROMPT_SCOPE_KEYS = ["image", "aplus", "ai"];
+let progressHideTimer = null;
+let generationWatchdogTimer = null;
+
+function normalizeResultScope(scope = "image") {
+  return ["image", "aplus"].includes(scope) ? scope : "image";
+}
+
+function normalizePromptScope(scope = "image") {
+  return PROMPT_SCOPE_KEYS.includes(scope) ? scope : "image";
+}
+
+function generationResultScope() {
+  return normalizeResultScope(state.activeGenerationId ? state.activeGenerationView : state.route);
+}
+
+function rememberGenerationScope(generationId, scope = "image") {
+  if (!generationId) return;
+  state.generationScopeById[generationId] = normalizeResultScope(scope);
+}
+
+function generationScopeFromEvent(payload = {}) {
+  const payloadScope = payload?.featureScope || payload?.scope;
+  if (payloadScope) return normalizeResultScope(payloadScope);
+  if (payload?.generationId && state.generationScopeById[payload.generationId]) {
+    return normalizeResultScope(state.generationScopeById[payload.generationId]);
+  }
+  if (state.activeGenerationId && state.generationScopeById[state.activeGenerationId]) {
+    return normalizeResultScope(state.generationScopeById[state.activeGenerationId]);
+  }
+  if (state.activeGenerationId) return normalizeResultScope(state.activeGenerationView);
+  return visibleResultScope();
+}
+
+function visibleResultScope() {
+  return normalizeResultScope(state.route);
+}
+
+function scopedResults(scope = visibleResultScope()) {
+  const key = normalizeResultScope(scope);
+  return state.viewResults[key] || [];
+}
+
+function setScopedResults(scope, results) {
+  const key = normalizeResultScope(scope);
+  state.viewResults[key] = Array.isArray(results) ? results.slice() : [];
+  if (key === "image") state.liveResults = state.viewResults[key];
+}
+
+function scopedSelectedIndex(scope = visibleResultScope()) {
+  const key = normalizeResultScope(scope);
+  return Number(state.viewSelectedResultIndex[key] ?? -1);
+}
+
+function setScopedSelectedIndex(scope, index) {
+  const key = normalizeResultScope(scope);
+  state.viewSelectedResultIndex[key] = Number(index);
+  if (key === "image") state.selectedResultIndex = state.viewSelectedResultIndex[key];
+}
+
+function productImagesForScope(scope = "image") {
+  const key = normalizeResultScope(scope);
+  if (key === "aplus") return state.aplus.images;
+  return state.images;
+}
+
+function analysisForScope(scope = "image") {
+  const key = normalizeResultScope(scope);
+  if (key === "aplus") return state.aplus.analysis || null;
+  return state.analysis || null;
+}
+
+function setAnalysisForScope(scope, analysis) {
+  const key = normalizeResultScope(scope);
+  if (key === "aplus") state.aplus.analysis = analysis || null;
+  else state.analysis = analysis || null;
+}
+
+function getPromptScopeConfigs() {
+  const configs = state.config?.promptScopeConfigs;
+  return configs && typeof configs === "object" ? configs : {};
+}
+
+function compactPromptScopeConfig(config = {}) {
+  const provider = String(config.promptProvider || "").trim() || "custom";
+  const preset = promptProviderPreset(provider);
+  const endpoint = String(config.promptEndpoint || preset.promptEndpoint || "chat").trim();
+  return {
+    promptProvider: provider,
+    promptBaseUrl: String(config.promptBaseUrl || preset.promptBaseUrl || "").trim(),
+    promptModel: String(config.promptModel || preset.promptModel || "").trim(),
+    promptEndpoint: ["responses", "chat", "auto", "gemini", "anthropic"].includes(endpoint) ? endpoint : (preset.promptEndpoint || "chat")
+  };
+}
+
+function currentGlobalPromptScopeConfig() {
+  const provider = state.config?.promptProvider || currentSettingsProvider() || "custom";
+  const preset = promptProviderPreset(provider);
+  return compactPromptScopeConfig({
+    promptProvider: provider,
+    promptBaseUrl: state.config?.promptBaseUrl || preset.promptBaseUrl || "",
+    promptModel: state.config?.promptModel || getLastPromptModel(provider) || preset.promptModel || "",
+    promptEndpoint: state.config?.promptEndpoint || preset.promptEndpoint || "chat"
+  });
+}
+
+function ensurePromptScopeDefaults(config = {}) {
+  const base = currentGlobalPromptScopeConfigForConfig(config);
+  const configs = { ...(config.promptScopeConfigs && typeof config.promptScopeConfigs === "object" ? config.promptScopeConfigs : {}) };
+  for (const scope of PROMPT_SCOPE_KEYS) {
+    configs[scope] = compactPromptScopeConfig({ ...base, ...(configs[scope] || {}) });
+  }
+  return { ...config, promptScopeConfigs: configs };
+}
+
+function currentGlobalPromptScopeConfigForConfig(config = {}) {
+  const provider = config.promptProvider || "custom";
+  const preset = API_PROVIDER_PRESETS[provider] || API_PROVIDER_PRESETS.custom;
+  return {
+    promptProvider: provider,
+    promptBaseUrl: config.promptBaseUrl || preset.promptBaseUrl || "",
+    promptModel: config.promptModel || preset.promptModel || "",
+    promptEndpoint: config.promptEndpoint || preset.promptEndpoint || "chat"
+  };
+}
+
+function promptScopeStoredConfig(scope = "image") {
+  return getPromptScopeConfigs()[normalizePromptScope(scope)] || {};
+}
+
+function promptProviderBaseUrl(provider, stored = {}) {
+  const preset = promptProviderPreset(provider);
+  if (stored.promptProvider === provider && stored.promptBaseUrl) return stored.promptBaseUrl;
+  if (state.config?.promptProvider === provider && state.config?.promptBaseUrl) return state.config.promptBaseUrl;
+  return preset.promptBaseUrl || "";
+}
+
+function promptProviderEndpoint(provider, stored = {}) {
+  const preset = promptProviderPreset(provider);
+  if (stored.promptProvider === provider && stored.promptEndpoint) return stored.promptEndpoint;
+  if (state.config?.promptProvider === provider && state.config?.promptEndpoint) return state.config.promptEndpoint;
+  return preset.promptEndpoint || "chat";
+}
+
+function promptConfigForScope(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const stored = promptScopeStoredConfig(key);
+  const globalConfig = currentGlobalPromptScopeConfig();
+  const provider = stored.promptProvider || globalConfig.promptProvider || "custom";
+  const preset = promptProviderPreset(provider);
+  const promptModel = stored.promptModel
+    || getLastPromptModel(provider)
+    || (state.config?.promptProvider === provider ? state.config?.promptModel : "")
+    || preset.promptModel
+    || "";
+  return {
+    promptProvider: provider,
+    promptBaseUrl: promptProviderBaseUrl(provider, stored),
+    promptApiKey: getSavedPromptApiKey(provider) || (state.config?.promptProvider === provider ? state.config?.promptApiKey || "" : ""),
+    promptModel,
+    promptEndpoint: promptProviderEndpoint(provider, stored),
+    promptProviderApiOptions: state.config?.promptProviderApiOptions || {},
+    promptModelCapabilities: state.config?.promptModelCapabilities || {}
+  };
+}
+
+function promptConfigWithApiKey(config = {}) {
+  const provider = config.promptProvider || "custom";
+  return {
+    ...config,
+    promptApiKey: getSavedPromptApiKey(provider) || (state.config?.promptProvider === provider ? state.config?.promptApiKey || "" : "") || config.promptApiKey || ""
+  };
+}
+
+function setPromptScopeConfig(scope, patch = {}) {
+  const key = normalizePromptScope(scope);
+  const promptScopeConfigs = {
+    ...getPromptScopeConfigs(),
+    [key]: compactPromptScopeConfig({
+      ...promptScopeStoredConfig(key),
+      ...patch
+    })
+  };
+  state.config = { ...(state.config || {}), promptScopeConfigs };
+  return promptScopeConfigs;
+}
+
+function scopedLiveCompletedCount(scope = visibleResultScope()) {
+  const key = normalizeResultScope(scope);
+  return Number(state.viewLiveCompletedCount[key] || 0);
+}
+
+function setScopedLiveCompletedCount(scope, count) {
+  const key = normalizeResultScope(scope);
+  state.viewLiveCompletedCount[key] = Math.max(0, Number(count || 0));
+  if (key === "image") state.liveCompletedCount = state.viewLiveCompletedCount[key];
+}
+
+function scopedLiveTotalCount(scope = visibleResultScope()) {
+  const key = normalizeResultScope(scope);
+  return Number(state.viewLiveTotalCount[key] || 0);
+}
+
+function setScopedLiveTotalCount(scope, count) {
+  const key = normalizeResultScope(scope);
+  state.viewLiveTotalCount[key] = Math.max(0, Number(count || 0));
+  if (key === "image") state.liveTotalCount = state.viewLiveTotalCount[key];
+}
+
+function scopedLiveProgressByIndex(scope = visibleResultScope()) {
+  const key = normalizeResultScope(scope);
+  state.viewLiveProgressByIndex[key] = state.viewLiveProgressByIndex[key] || {};
+  return state.viewLiveProgressByIndex[key];
+}
+
+function resetScopedLiveProgress(scope) {
+  const key = normalizeResultScope(scope);
+  state.viewLiveProgressByIndex[key] = {};
+  if (key === "image") state.liveProgressByIndex = state.viewLiveProgressByIndex[key];
+}
+
+function scopedSuitePlan(scope = "image") {
+  const key = normalizeResultScope(scope);
+  return state.viewSuitePlan[key] || null;
+}
+
+function setScopedSuitePlan(scope, plan) {
+  const key = normalizeResultScope(scope);
+  state.viewSuitePlan[key] = plan || null;
+  if (key === "image") state.suitePlan = state.viewSuitePlan[key];
+}
+
+function scopedPromptPlan(scope = "image") {
+  const key = normalizeResultScope(scope);
+  return state.viewPromptPlan[key] || [];
+}
+
+function setScopedPromptPlan(scope, items) {
+  const key = normalizeResultScope(scope);
+  state.viewPromptPlan[key] = Array.isArray(items) ? items.slice() : [];
+  if (key === "image") state.promptPlan = state.viewPromptPlan[key];
+}
+
+function logClientEvent(event, details = {}) {
+  try {
+    window.studio?.logClientEvent?.({
+      event,
+      rendererBuildId: RENDERER_BUILD_ID,
+      route: state.route,
+      activeGenerationId: state.activeGenerationId,
+      ...details
+    }).catch(() => {});
+  } catch {
+    // Client diagnostics must never interrupt generation.
+  }
+}
+
+function runUiSafely(label, callback) {
+  try {
+    return callback?.();
+  } catch (error) {
+    logClientEvent("renderer-ui-error", {
+      label,
+      error: shortErrorMessage(error)
+    });
+    return undefined;
+  }
+}
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -75,9 +400,15 @@ const A_PLUS_OPTIONS = {
 };
 
 const PRODUCT_IMAGE_LIMIT = 6;
+const AI_REFERENCE_IMAGE_LIMIT = 6;
+const AI_FILE_LIMIT = 8;
+const AI_FILE_MAX_SIZE = 25 * 1024 * 1024;
+const AI_FILE_CONTEXT_LIMIT = 90000;
+const AI_FILE_TEXT_PER_FILE_LIMIT = 35000;
 const CUTOUT_DEFAULT_HINT = "10M 以内，点击或拖拽随手拍产品图";
 const CUSTOM_MODEL_VALUE = "__custom_model__";
 const MODEL_ICON_BASE = "../assets/model-icons/";
+const PROVIDER_ICON_BASE = "../assets/provider-icons/";
 const MODEL_ICON_FILES = {
   chatgpt: "chatgpt.svg",
   gemini: "gemini.svg",
@@ -89,13 +420,41 @@ const MODEL_ICON_FILES = {
   banana: "nano-banana.svg",
   generic: "ai-generic.svg"
 };
+const PROVIDER_ICON_FILES = {
+  "302ai": "302ai.svg",
+  aihubmix: "aihubmix.ico",
+  aliyun: "aliyun.ico",
+  anthropic: "anthropic.ico",
+  baichuan: "baichuan.png",
+  baidu: "baidu.ico",
+  bfl: "bfl.ico",
+  cherryin: "cherryin.png",
+  deepseek: "deepseek.ico",
+  fireworks: "fireworks.ico",
+  gemini: "gemini.png",
+  groq: "groq.ico",
+  lmstudio: "lmstudio.ico",
+  minimax: "minimax.ico",
+  moonshot: "moonshot.ico",
+  ollama: "ollama.png",
+  openai: "openai.svg",
+  openrouter: "openrouter.ico",
+  replicate: "replicate.png",
+  siliconflow: "siliconflow.ico",
+  stability: "stability.ico",
+  tencent: "tencent.ico",
+  together: "together.png",
+  volcengine: "volcengine.png",
+  xiaomi: "xiaomi.ico",
+  zhipu: "zhipu.png"
+};
 const STANDARD_IMAGE_MODELS = new Set(["nano-banana-fast", "gpt-image-2", "nano-banana"]);
 const GRSAI_IMAGE_MODEL_INFO = {
   "gpt-image-2": {
     resolutions: ["1K"],
     supportText: "1K",
     tier: "standard",
-    strength: "基础稳定，适合日常主图/SKU/白底图。"
+    strength: "基础稳定，适合日常SKU/白底图/场景图。"
   },
   "gpt-image-2-vip": {
     resolutions: ["1K", "2K", "4K"],
@@ -137,7 +496,7 @@ const GRSAI_IMAGE_MODEL_INFO = {
     resolutions: ["1K", "2K"],
     supportText: "1K / 2K",
     tier: "advanced",
-    strength: "一致性优先，适合克隆/参考感更强的图片。"
+    strength: "一致性优先，适合参考图保真和正式套图。"
   },
   "nano-banana-pro-cl": {
     resolutions: ["1K", "2K", "4K"],
@@ -183,6 +542,8 @@ const GRSAI_IMAGE_MODELS = [
 const API_PROVIDER_PRESETS = {
   "grsai-gemini": {
     label: "Grsai Gemini（推荐）",
+    icon: "gemini",
+    category: "relay",
     promptBaseUrl: "https://grsai.dakka.com.cn/v1",
     promptModel: "gemini-3.1-pro",
     promptEndpoint: "chat",
@@ -192,6 +553,7 @@ const API_PROVIDER_PRESETS = {
   },
   zyapi: {
     label: "ZyAPI",
+    category: "relay",
     promptBaseUrl: "https://zyapi.tuluo.top:8888/v1",
     promptModel: "gpt-5.4",
     promptEndpoint: "chat",
@@ -201,24 +563,30 @@ const API_PROVIDER_PRESETS = {
   },
   "openai-response": {
     label: "OpenAI-Response",
+    icon: "openai",
+    category: "official",
     promptBaseUrl: "https://api.openai.com/v1",
     promptModel: "gpt-4.1",
     promptEndpoint: "responses",
-    models: ["gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3"],
+    models: ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "o4-mini", "o3"],
     hint: "使用 OpenAI Responses API，适合需要推理、工具参数和新版 Responses 能力的模型。",
     source: "OpenAI Responses API"
   },
   openai: {
     label: "OpenAI",
+    icon: "openai",
+    category: "official",
     promptBaseUrl: "https://api.openai.com/v1",
     promptModel: "gpt-4.1",
     promptEndpoint: "chat",
-    models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
+    models: ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
     hint: "OpenAI Chat Completions 兼容模式。",
     source: "OpenAI API"
   },
   gemini: {
-    label: "Gemini",
+    label: "Google Gemini",
+    icon: "gemini",
+    category: "official",
     promptBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
     promptModel: "gemini-2.5-pro",
     promptEndpoint: "gemini",
@@ -228,24 +596,41 @@ const API_PROVIDER_PRESETS = {
   },
   anthropic: {
     label: "Anthropic",
+    icon: "anthropic",
+    category: "official",
     promptBaseUrl: "https://api.anthropic.com/v1",
-    promptModel: "claude-3-5-sonnet-latest",
+    promptModel: "claude-sonnet-4-5",
     promptEndpoint: "anthropic",
-    models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest", "claude-3-opus-latest"],
+    models: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
     hint: "Anthropic Messages API，适合 Claude 系列模型。",
     source: "Anthropic Messages API"
   },
+  azure: {
+    label: "Azure OpenAI",
+    icon: "openai",
+    category: "official",
+    promptBaseUrl: "",
+    promptModel: "",
+    promptEndpoint: "chat",
+    models: [],
+    hint: "Azure OpenAI 的地址、部署名和 api-version 由 Azure 资源决定，请按你的 Azure 控制台填写。",
+    source: "Azure OpenAI 控制台"
+  },
   qwen: {
-    label: "千问",
+    label: "阿里云百炼 / 通义千问",
+    icon: "aliyun",
+    category: "official",
     promptBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     promptModel: "qwen3-vl-plus",
     promptEndpoint: "chat",
-    models: ["qwen3-vl-plus", "qwen-vl-plus", "qwen-plus", "qwen-turbo"],
+    models: ["qwen3-vl-plus", "qwen3-vl-flash", "qwen3-max", "qwen-plus", "qwen-turbo"],
     hint: "千问建议使用 VL 模型做图片识别；官方 OpenAI 兼容地址为阿里云百炼 DashScope compatible-mode/v1。",
     source: "阿里云百炼官方 OpenAI 兼容文档"
   },
   deepseek: {
-    label: "DeepSeek",
+    label: "深度求索 DeepSeek",
+    icon: "deepseek",
+    category: "official",
     promptBaseUrl: "https://api.deepseek.com",
     promptModel: "deepseek-chat",
     promptEndpoint: "chat",
@@ -254,16 +639,41 @@ const API_PROVIDER_PRESETS = {
     source: "DeepSeek 官方 API 文档"
   },
   doubao: {
-    label: "豆包",
+    label: "火山引擎 / 豆包",
+    icon: "volcengine",
+    category: "official",
     promptBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    promptModel: "doubao-seed-1-6-vision-250615",
-    promptEndpoint: "chat",
-    models: ["doubao-seed-1-6-vision-250615", "doubao-seed-1-6-250615", "doubao-1-5-vision-pro-250328"],
-    hint: "豆包使用火山方舟 OpenAI 兼容接口；实际模型名也可以填写控制台创建的 ep- 开头推理接入点 ID。",
+    promptModel: "doubao-seed-2-0-lite-260215",
+    promptEndpoint: "auto",
+    models: [
+      "doubao-seed-2-0-lite-260215",
+      "doubao-seed-2-0-pro-260215",
+      "doubao-seed-1-6-vision-250615",
+      "doubao-seed-1-6-250615",
+      "doubao-1-5-vision-pro-250328",
+      "deepseek-v3-1-250821",
+      "deepseek-r1-250528",
+      "deepseek-v4-flash-260425",
+      "deepseek-v4-pro-260425"
+    ],
+    hint: "火山方舟使用 OpenAI 兼容地址 /api/v3；模型列表返回的是目录，不等于当前 Key 已授权。套餐/推理接入点/自定义接入点请手动填控制台代码示例里的 ep-... 接入点 ID，接口类型建议 auto。",
     source: "火山方舟官方 OpenAI 兼容文档"
   },
+  moonshot: {
+    label: "月之暗面 / Kimi",
+    icon: "moonshot",
+    category: "official",
+    promptBaseUrl: "https://api.moonshot.cn/v1",
+    promptModel: "kimi-k2-0711-preview",
+    promptEndpoint: "chat",
+    models: ["kimi-k2-0711-preview", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+    hint: "月之暗面 Kimi 提供 OpenAI 兼容接口，适合文本理解、长上下文和标题任务；视觉能力以控制台开放模型为准。",
+    source: "Moonshot AI OpenAI 兼容 API"
+  },
   zhipu: {
-    label: "智普/智谱",
+    label: "智谱 GLM",
+    icon: "zhipu",
+    category: "official",
     promptBaseUrl: "https://open.bigmodel.cn/api/paas/v4",
     promptModel: "glm-5.1",
     promptEndpoint: "chat",
@@ -271,14 +681,180 @@ const API_PROVIDER_PRESETS = {
     hint: "智谱 GLM 官方兼容 OpenAI Chat Completions v4 接口；如账号是 Coding Plan，请按控制台说明改为专属 Coding 地址。",
     source: "智谱官方 API 文档"
   },
+  baichuan: {
+    label: "百川智能",
+    icon: "baichuan",
+    category: "official",
+    promptBaseUrl: "https://api.baichuan-ai.com/v1",
+    promptModel: "Baichuan4",
+    promptEndpoint: "chat",
+    models: ["Baichuan4", "Baichuan3-Turbo", "Baichuan3-Turbo-128k"],
+    hint: "百川智能提供 OpenAI 兼容调用方式，适合中文文本生成和商品信息理解；视觉能力以控制台模型为准。",
+    source: "百川智能 API 文档"
+  },
+  minimax: {
+    label: "MiniMax",
+    icon: "minimax",
+    category: "official",
+    promptBaseUrl: "https://api.minimax.chat/v1",
+    promptModel: "MiniMax-M1",
+    promptEndpoint: "chat",
+    models: ["MiniMax-M1", "abab6.5s-chat", "abab6.5g-chat"],
+    hint: "MiniMax 支持对话模型接入，适合文案和标题任务；视觉模型请以控制台开放情况为准。",
+    source: "MiniMax API 文档"
+  },
+  hunyuan: {
+    label: "腾讯混元",
+    icon: "tencent",
+    category: "official",
+    promptBaseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
+    promptModel: "hunyuan-turbos-latest",
+    promptEndpoint: "chat",
+    models: ["hunyuan-turbos-latest", "hunyuan-turbo-latest", "hunyuan-lite"],
+    hint: "腾讯混元提供兼容 OpenAI 的调用方式，适合中文文案和多模态任务；模型权限以腾讯云控制台为准。",
+    source: "腾讯混元 API 文档"
+  },
+  qianfan: {
+    label: "百度千帆 / 文心",
+    icon: "baidu",
+    category: "official",
+    promptBaseUrl: "https://qianfan.baidubce.com/v2",
+    promptModel: "ernie-4.5-turbo-vl",
+    promptEndpoint: "chat",
+    models: ["ernie-4.5-turbo-vl", "ernie-4.5-turbo", "ernie-x1-turbo"],
+    hint: "百度千帆 v2 提供 OpenAI 兼容接口，视觉模型适合商品图识别；请确认账号已开通对应模型。",
+    source: "百度智能云千帆 v2 API 文档"
+  },
   xiaomi: {
-    label: "小米",
+    label: "Xiaomi MiMo",
+    icon: "xiaomi",
+    category: "official",
     promptBaseUrl: "https://api.xiaomimimo.com/v1",
     promptModel: "mimo-v2.5-pro",
     promptEndpoint: "chat",
     models: ["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-flash"],
-    hint: "小米 MiMo 官网可确认 API 平台和 V2.5 系列模型；Base URL 可能随账号和 Token Plan 调整，请以控制台为准。",
+    hint: "小米 MiMo 普通 OpenAI 兼容调用默认使用 api.xiaomimimo.com；Token Plan 请填写订阅页给出的专属 Base URL 和 tp- 开头 Key。",
     source: "小米 MiMo API 平台"
+  },
+  groq: {
+    label: "Groq",
+    icon: "groq",
+    category: "official",
+    promptBaseUrl: "https://api.groq.com/openai/v1",
+    promptModel: "llama-3.3-70b-versatile",
+    promptEndpoint: "chat",
+    models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b"],
+    hint: "Groq 提供 OpenAI 兼容高速推理接口，适合文本提示词和标题任务。",
+    source: "Groq OpenAI 兼容 API"
+  },
+  together: {
+    label: "Together AI",
+    icon: "together",
+    category: "official",
+    promptBaseUrl: "https://api.together.xyz/v1",
+    promptModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    promptEndpoint: "chat",
+    models: ["meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-VL-72B-Instruct", "deepseek-ai/DeepSeek-R1"],
+    hint: "Together AI 提供多模型 OpenAI 兼容接口，模型名通常带 owner/name。",
+    source: "Together AI API 文档"
+  },
+  fireworks: {
+    label: "Fireworks AI",
+    icon: "fireworks",
+    category: "official",
+    promptBaseUrl: "https://api.fireworks.ai/inference/v1",
+    promptModel: "accounts/fireworks/models/llama-v3p3-70b-instruct",
+    promptEndpoint: "chat",
+    models: ["accounts/fireworks/models/llama-v3p3-70b-instruct", "accounts/fireworks/models/deepseek-r1"],
+    hint: "Fireworks AI 使用 OpenAI 兼容接口，模型名通常是 accounts/.../models/...。",
+    source: "Fireworks AI API 文档"
+  },
+  openrouter: {
+    label: "OpenRouter",
+    icon: "openrouter",
+    category: "relay",
+    promptBaseUrl: "https://openrouter.ai/api/v1",
+    promptModel: "openai/gpt-4o-mini",
+    promptEndpoint: "chat",
+    models: ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet", "google/gemini-2.5-pro", "deepseek/deepseek-chat"],
+    hint: "OpenRouter 是第三方聚合平台，模型和兼容参数会随平台变化，可用右侧 API 设置调节。",
+    source: "OpenRouter API 文档"
+  },
+  siliconflow: {
+    label: "硅基流动 SiliconFlow",
+    icon: "siliconflow",
+    category: "relay",
+    promptBaseUrl: "https://api.siliconflow.cn/v1",
+    promptModel: "Qwen/Qwen2.5-VL-72B-Instruct",
+    promptEndpoint: "chat",
+    models: ["Qwen/Qwen2.5-VL-72B-Instruct", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen3-235B-A22B"],
+    hint: "硅基流动是模型聚合/托管平台，OpenAI 兼容接口可用于国内常用模型。",
+    source: "硅基流动 API 文档"
+  },
+  aihubmix: {
+    label: "AiHubMix",
+    icon: "aihubmix",
+    category: "relay",
+    promptBaseUrl: "https://aihubmix.com/v1",
+    promptModel: "gpt-4o-mini",
+    promptEndpoint: "chat",
+    models: ["gpt-4o-mini", "gpt-4.1-mini", "gemini-2.5-pro", "claude-3-5-sonnet-latest"],
+    hint: "AiHubMix 是第三方中转平台，适合按平台开放模型填写；必要时可打开 API 设置调节兼容选项。",
+    source: "AiHubMix 控制台"
+  },
+  "302ai": {
+    label: "302.AI",
+    icon: "302ai",
+    category: "relay",
+    promptBaseUrl: "https://api.302.ai/v1",
+    promptModel: "gpt-4o-mini",
+    promptEndpoint: "chat",
+    models: ["gpt-4o-mini", "gpt-4.1-mini", "gemini-2.5-pro", "claude-3-5-sonnet-latest"],
+    hint: "302.AI 是第三方中转平台，模型命名和兼容参数以平台控制台为准。",
+    source: "302.AI API 文档"
+  },
+  ollama: {
+    label: "Ollama",
+    icon: "ollama",
+    category: "local",
+    promptBaseUrl: "http://127.0.0.1:11434/v1",
+    promptModel: "llama3.2-vision",
+    promptEndpoint: "chat",
+    models: ["llama3.2-vision", "llama3.1", "qwen2.5vl", "gemma3"],
+    hint: "Ollama 本地模型兼容 OpenAI /v1/chat/completions，需要本机 Ollama 已运行并拉取对应模型。",
+    source: "Ollama OpenAI 兼容接口"
+  },
+  "lm-studio": {
+    label: "LM Studio",
+    icon: "lmstudio",
+    category: "local",
+    promptBaseUrl: "http://127.0.0.1:1234/v1",
+    promptModel: "local-model",
+    promptEndpoint: "chat",
+    models: ["local-model"],
+    hint: "LM Studio 本地服务兼容 OpenAI 接口，需要先在 LM Studio 启动本地服务器。",
+    source: "LM Studio Local Server"
+  },
+  "new-api": {
+    label: "New API",
+    category: "relay",
+    promptBaseUrl: "",
+    promptModel: "",
+    promptEndpoint: "chat",
+    models: [],
+    hint: "New API 类自建中转平台需要填写你的服务地址、Key 和模型名，必要时打开 API 设置调节兼容参数。",
+    source: "New API 自建平台"
+  },
+  cherryin: {
+    label: "CherryIN",
+    icon: "cherryin",
+    category: "relay",
+    promptBaseUrl: "",
+    promptModel: "",
+    promptEndpoint: "chat",
+    models: [],
+    hint: "CherryIN 类中转服务需要按平台控制台填写 API 地址、Key 和模型名。",
+    source: "CherryIN / 中转平台"
   },
   custom: {
     label: "自定义",
@@ -286,6 +862,7 @@ const API_PROVIDER_PRESETS = {
     promptModel: "",
     promptEndpoint: "chat",
     models: [],
+    category: "custom",
     hint: "自定义适用于任何兼容 OpenAI 的 API，请手动填写 API 地址、Key、模型和接口类型。",
     source: ""
   }
@@ -298,11 +875,28 @@ const DEFAULT_PROVIDER_ORDER = [
   "openai",
   "gemini",
   "anthropic",
+  "azure",
   "qwen",
   "deepseek",
   "doubao",
+  "moonshot",
   "zhipu",
-  "xiaomi"
+  "baichuan",
+  "minimax",
+  "hunyuan",
+  "qianfan",
+  "xiaomi",
+  "groq",
+  "together",
+  "fireworks",
+  "openrouter",
+  "siliconflow",
+  "aihubmix",
+  "302ai",
+  "ollama",
+  "lm-studio",
+  "new-api",
+  "cherryin"
 ];
 
 const API_OPTION_DEFAULTS = {
@@ -313,6 +907,17 @@ const API_OPTION_DEFAULTS = {
   enableThinking: false,
   verbosity: false
 };
+
+function apiOptionDefaultsForProvider(provider = "") {
+  const preset = API_PROVIDER_PRESETS[provider] || {};
+  const responseLike = (preset.promptEndpoint || "") === "responses";
+  return {
+    ...API_OPTION_DEFAULTS,
+    streamOptions: false,
+    enableThinking: false,
+    verbosity: responseLike
+  };
+}
 
 const CAPABILITY_META = [
   { key: "vision", label: "视觉", short: "眼" },
@@ -447,6 +1052,10 @@ function normalizeTitlePlatform(platform) {
   return normalizePlatformKey(platform) === "Temu" ? "Temu" : "Amazon";
 }
 
+function normalizeFeaturePlatform(platform) {
+  return normalizePlatformKey(platform) || "Amazon";
+}
+
 const els = {
   app: $("#app"),
   inviteGate: $("#inviteGate"),
@@ -457,6 +1066,8 @@ const els = {
   inviteError: $("#inviteError"),
   sideNavItems: $$(".side-nav-item"),
   imagePage: $("#imagePage"),
+  aiPage: $("#aiPage"),
+  aplusPage: $("#aplusPage"),
   titlePage: $("#titlePage"),
   videoPage: $("#videoPage"),
   apiState: $("#apiState"),
@@ -479,8 +1090,17 @@ const els = {
   packageModeHint: $("#packageModeHint"),
   productModeTips: $("#productModeTips"),
   productInfo: $("#productInfo"),
+  unitOfSaleInput: $("#unitOfSaleInput"),
+  bundleFields: $("#bundleFields"),
+  bundleComponentsInput: $("#bundleComponentsInput"),
+  componentDifferencesInput: $("#componentDifferencesInput"),
+  multipackFields: $("#multipackFields"),
+  pcsCountInput: $("#pcsCountInput"),
+  packArrangementInput: $("#packArrangementInput"),
+  usageNotesInput: $("#usageNotesInput"),
   charCount: $("#charCount"),
   analyzeBtn: $("#analyzeBtn"),
+  imageAiInlineStatus: $("#imageAiInlineStatus"),
   generateBtn: $("#generateBtn"),
   summaryBox: $("#summaryBox"),
   sellingPointsBox: $("#sellingPointsBox"),
@@ -508,12 +1128,17 @@ const els = {
   titleWarningsBox: $("#titleWarningsBox"),
   titleDetailsToggle: $("#titleDetailsToggle"),
   copyTitleBtn: $("#copyTitleBtn"),
+  suiteCustomPanel: $("#suiteCustomPanel"),
   progressBox: $("#progressBox"),
   progressText: $("#progressText"),
   progressNumber: $("#progressNumber"),
   progressFill: $("#progressFill"),
   results: $("#results"),
   planningModelLabel: $("#planningModelLabel"),
+  mainPromptProviderSelect: $("#mainPromptProviderSelect"),
+  mainPromptModelSelect: $("#mainPromptModelSelect"),
+  mainPromptModelCustom: $("#mainPromptModelCustom"),
+  mainPromptModelTestBtn: $("#mainPromptModelTestBtn"),
   suitePlanStatus: $("#suitePlanStatus"),
   styleMasterBox: $("#styleMasterBox"),
   promptPlanList: $("#promptPlanList"),
@@ -523,21 +1148,73 @@ const els = {
   saveSelectedBtn: $("#saveSelectedBtn"),
   openSelectedBtn: $("#openSelectedBtn"),
   promptEditor: $("#promptEditor"),
+  promptDrawer: $("#promptDrawer"),
+  closePromptDrawerBtn: $("#closePromptDrawerBtn"),
+  promptDrawerMeta: $("#promptDrawerMeta"),
+  promptDrawerText: $("#promptDrawerText"),
   regenerateSelectedBtn: $("#regenerateSelectedBtn"),
-  modelTierTabs: $("#modelTierTabs"),
   imageModelTierBadge: $("#imageModelTierBadge"),
   currentImageModelName: $("#currentImageModelName"),
   currentImageModelDesc: $("#currentImageModelDesc"),
   modelRouteHint: $("#modelRouteHint"),
+  workflowSteps: $("#workflowSteps"),
   repairCanvasWrap: $("#repairCanvasWrap"),
   repairCanvasImage: $("#repairCanvasImage"),
   repairCanvas: $("#repairCanvas"),
   repairInstruction: $("#repairInstruction"),
   clearRepairMarksBtn: $("#clearRepairMarksBtn"),
   repairSelectedBtn: $("#repairSelectedBtn"),
+  aplusStatusLine: $("#aplusStatusLine"),
+  aplusDropzone: $("#aplusDropzone"),
+  aplusFileInput: $("#aplusFileInput"),
+  aplusUploadHint: $("#aplusUploadHint"),
+  aplusThumbs: $("#aplusThumbs"),
+  aplusPlatform: $("#aplusPlatform"),
+  aplusRegion: $("#aplusRegion"),
+  aplusLanguage: $("#aplusLanguage"),
+  aplusFormat: $("#aplusFormat"),
+  aplusProductName: $("#aplusProductName"),
+  aplusProductInfo: $("#aplusProductInfo"),
+  aplusAnalyzeBtn: $("#aplusAnalyzeBtn"),
+  aplusAiInlineStatus: $("#aplusAiInlineStatus"),
+  aplusImageModelRoute: $("#aplusImageModelRoute"),
+  aplusPlanningModelLabel: $("#aplusPlanningModelLabel"),
+  aplusPromptProviderSelect: $("#aplusPromptProviderSelect"),
+  aplusPromptModelSelect: $("#aplusPromptModelSelect"),
+  aplusPromptModelCustom: $("#aplusPromptModelCustom"),
+  aplusPromptModelTestBtn: $("#aplusPromptModelTestBtn"),
+  aplusModuleGrid: $("#aplusModuleGrid"),
+  aplusSelectAllModulesBtn: $("#aplusSelectAllModulesBtn"),
+  aplusGenerateBtn: $("#aplusGenerateBtn"),
+  aplusProgressBox: $("#aplusProgressBox"),
+  aplusProgressText: $("#aplusProgressText"),
+  aplusProgressNumber: $("#aplusProgressNumber"),
+  aplusProgressFill: $("#aplusProgressFill"),
+  aplusResults: $("#aplusResults"),
   recoverHistoryBtn: $("#recoverHistoryBtn"),
   historyList: $("#historyList"),
   totalCountValue: $("#totalCountValue"),
+  aiOpenSettingsBtn: $("#aiOpenSettingsBtn"),
+  aiNewChatBtn: $("#aiNewChatBtn"),
+  aiModeGroup: $("#aiModeGroup"),
+  aiPromptProviderSelect: $("#aiPromptProviderSelect"),
+  aiPromptModelSelect: $("#aiPromptModelSelect"),
+  aiPromptModelCustom: $("#aiPromptModelCustom"),
+  aiImageModelSelect: $("#aiImageModelSelect"),
+  aiImageModelCustom: $("#aiImageModelCustom"),
+  aiDropzone: $("#aiDropzone"),
+  aiFileInput: $("#aiFileInput"),
+  aiDocumentDropzone: $("#aiDocumentDropzone"),
+  aiDocumentInput: $("#aiDocumentInput"),
+  aiDocumentHint: $("#aiDocumentHint"),
+  aiUploadHint: $("#aiUploadHint"),
+  aiThumbs: $("#aiThumbs"),
+  aiFileChips: $("#aiFileChips"),
+  aiMessageInput: $("#aiMessageInput"),
+  aiClearBtn: $("#aiClearBtn"),
+  aiSendBtn: $("#aiSendBtn"),
+  aiMessages: $("#aiMessages"),
+  aiStatusLine: $("#aiStatusLine"),
   aPlusOptions: $("#aPlusOptions"),
   aPlusSize: $("#aPlusSize"),
   toast: $("#toast"),
@@ -557,11 +1234,28 @@ const els = {
   apiAdvancedModal: $("#apiAdvancedModal"),
   closeApiAdvancedBtn: $("#closeApiAdvancedBtn"),
   providerAddModal: $("#providerAddModal"),
+  providerAddTitle: $("#providerAddTitle"),
   providerNameInput: $("#providerNameInput"),
   providerTypeSelect: $("#providerTypeSelect"),
   cancelProviderAddBtn: $("#cancelProviderAddBtn"),
   confirmProviderAddBtn: $("#confirmProviderAddBtn"),
   closeProviderAddBtn: $("#closeProviderAddBtn"),
+  providerNoteModal: $("#providerNoteModal"),
+  providerNoteTitle: $("#providerNoteTitle"),
+  providerNoteInput: $("#providerNoteInput"),
+  providerNoteCancelBtn: $("#providerNoteCancelBtn"),
+  providerNoteSaveBtn: $("#providerNoteSaveBtn"),
+  providerNoteCloseX: $("#providerNoteCloseX"),
+  providerContextMenu: $("#providerContextMenu"),
+  promptTestModal: $("#promptTestModal"),
+  promptTestProviderLabel: $("#promptTestProviderLabel"),
+  promptTestModelSearch: $("#promptTestModelSearch"),
+  promptTestModelSelect: $("#promptTestModelSelect"),
+  promptTestModelCustom: $("#promptTestModelCustom"),
+  promptTestHint: $("#promptTestHint"),
+  promptTestCancelBtn: $("#promptTestCancelBtn"),
+  promptTestStartBtn: $("#promptTestStartBtn"),
+  promptTestCloseX: $("#promptTestCloseX"),
   modelEditModal: $("#modelEditModal"),
   modelEditTitle: $("#modelEditTitle"),
   modelEditId: $("#modelEditId"),
@@ -573,6 +1267,7 @@ const els = {
   imageViewerImg: $("#imageViewerImg"),
   imageViewerTitle: $("#imageViewerTitle"),
   closeImageViewer: $("#closeImageViewer"),
+  saveViewerImageBtn: $("#saveViewerImageBtn"),
   cutoutConfirm: $("#cutoutConfirm"),
   cutoutOriginalPreview: $("#cutoutOriginalPreview"),
   cutoutPreview: $("#cutoutPreview"),
@@ -591,6 +1286,18 @@ const els = {
   errorModalMessage: $("#errorModalMessage"),
   errorModalClose: $("#errorModalClose"),
   errorModalCloseX: $("#errorModalCloseX"),
+  updateManifestUrl: $("#updateManifestUrl"),
+  updateCheckOnStartup: $("#updateCheckOnStartup"),
+  checkUpdateBtn: $("#checkUpdateBtn"),
+  updateActionStatus: $("#updateActionStatus"),
+  updateModal: $("#updateModal"),
+  updateModalVersion: $("#updateModalVersion"),
+  updateModalSummary: $("#updateModalSummary"),
+  updateModalNotes: $("#updateModalNotes"),
+  updateCloseX: $("#updateCloseX"),
+  updateLaterBtn: $("#updateLaterBtn"),
+  updateNotesBtn: $("#updateNotesBtn"),
+  updateDownloadBtn: $("#updateDownloadBtn"),
   imageTestModal: $("#imageTestModal"),
   imageTestModelSelect: $("#imageTestModelSelect"),
   imageTestModelCustom: $("#imageTestModelCustom"),
@@ -605,12 +1312,31 @@ let appInitialized = false;
 let pendingCutoutResult = null;
 let pendingCutoutOriginal = null;
 let pendingRepairResult = null;
+let currentViewerImage = null;
 let errorModalRetryHandler = null;
 let imageTestDialogResolver = null;
+let promptTestDialogResolver = null;
+let promptTestModelOptions = [];
 let repairDrawing = false;
 let repairLastPoint = null;
 
+function ensureBodyOverlay(element) {
+  if (element && element.parentElement !== document.body) {
+    document.body.appendChild(element);
+  }
+  return element;
+}
+
+function showOverlay(element) {
+  ensureBodyOverlay(element)?.classList.remove("hidden");
+}
+
+function hideOverlay(element) {
+  element?.classList.add("hidden");
+}
+
 function toast(message, type = "info") {
+  ensureBodyOverlay(els.toast);
   els.toast.textContent = message;
   els.toast.classList.toggle("error", type === "error");
   els.toast.classList.remove("hidden");
@@ -628,7 +1354,7 @@ function showMessageModal(message, title = "提示", type = "info") {
   const card = els.errorModal.querySelector(".error-card");
   card?.classList.toggle("success", type === "success");
   configureErrorModalRetry(null);
-  els.errorModal.classList.remove("hidden");
+  showOverlay(els.errorModal);
 }
 
 function isTimeoutMessage(message) {
@@ -665,6 +1391,9 @@ function humanizeErrorMessage(error, fallback = "发生未知错误，请检查 
   }
   if (/\b404\b/i.test(message)) {
     return `接口地址或模型名不存在，请检查 API 地址、接口类型和模型名称。${debugText}`;
+  }
+  if (/火山方舟|推理接入点|接入点 ID|ep-|volces|ark\.cn/i.test(message)) {
+    return `${message}${debugText && !message.includes(debugText) ? debugText : ""}`;
   }
   if (/\b429\b|quota|rate limit|余额|额度/i.test(message)) {
     return `请求过于频繁或账号额度不足，请稍后重试，或检查账号余额。${debugText}`;
@@ -712,32 +1441,82 @@ function showFailureModal(error, title, retryHandler) {
 }
 
 function iconPath(iconKey = "generic") {
+  const providerFile = PROVIDER_ICON_FILES[iconKey];
+  if (providerFile) return `${PROVIDER_ICON_BASE}${providerFile}`;
   return `${MODEL_ICON_BASE}${MODEL_ICON_FILES[iconKey] || MODEL_ICON_FILES.generic}`;
 }
 
+function providerIconPath(iconKey = "") {
+  const file = PROVIDER_ICON_FILES[iconKey];
+  return file ? `${PROVIDER_ICON_BASE}${file}` : iconPath("generic");
+}
+
 function modelIconKey(value = "", provider = "") {
-  const text = `${provider || ""} ${value || ""}`.toLowerCase();
-  if (/nano[-_\s]?banana|banana/.test(text)) return "banana";
-  if (/gemini|imagen|google/.test(text)) return "gemini";
-  if (/flux|bfl|black\s*forest|黑森林/.test(text)) return "flux";
-  if (/deepseek/.test(text)) return "deepseek";
-  if (/jimeng|即梦|jimeng-ai|jimengai/.test(text)) return "jimeng";
-  if (/doubao|seed|豆包|volces|火山/.test(text)) return "doubao";
-  if (/qwen|tongyi|通义|千问|wanxiang|万相/.test(text)) return "qwen";
-  if (/gpt|openai|chatgpt|\bo\d/.test(text)) return "chatgpt";
-  return "generic";
+  const modelText = String(value || "").toLowerCase();
+  const providerText = String(provider || "").toLowerCase();
+
+  if (/(^|[/:_\-\s])(?:gpt|chatgpt)(?:[/:_\-\s]|\d|$)|(^|[/:_\-\s])o[1345](?:[/:_\-\s]|$)|openai/.test(modelText)) return "openai";
+  if (/gemini|imagen|google/.test(modelText)) return "gemini";
+  if (/claude|anthropic/.test(modelText)) return "anthropic";
+  if (/deepseek/.test(modelText)) return "deepseek";
+  if (/qwen|tongyi|通义|千问|wanx|万相/.test(modelText)) return "aliyun";
+  if (/doubao|seedream|豆包|volces|火山/.test(modelText)) return "volcengine";
+  if (/kimi|moonshot/.test(modelText)) return "moonshot";
+  if (/glm|zhipu|智谱/.test(modelText)) return "zhipu";
+  if (/hunyuan|混元/.test(modelText)) return "tencent";
+  if (/ernie|qianfan|baidu|文心|千帆/.test(modelText)) return "baidu";
+  if (/minimax|abab/.test(modelText)) return "minimax";
+  if (/mimo|xiaomi|小米/.test(modelText)) return "xiaomi";
+  if (/flux|bfl|black\s*forest|黑森林/.test(modelText)) return "bfl";
+  if (/stable|stability/.test(modelText)) return "stability";
+  if (/nano[-_\s]?banana|banana/.test(modelText)) return "gemini";
+  if (/jimeng|即梦|jimeng-ai|jimengai/.test(modelText)) return "volcengine";
+
+  const providerIcon = providerIconKey(providerText);
+  return providerIcon || "generic";
 }
 
 function providerIconKey(provider = "") {
   const text = String(provider || "").toLowerCase();
   if (text === "grsai") return "banana";
-  if (text === "zyapi" || text === "openai") return "chatgpt";
-  if (text === "grsai-gemini" || text === "gemini") return "gemini";
-  if (text === "qwen") return "qwen";
-  if (text === "deepseek") return "deepseek";
-  if (text === "doubao") return "jimeng";
-  if (text === "bfl") return "flux";
-  return modelIconKey(provider);
+  const preset = API_PROVIDER_PRESETS[provider] || IMAGE_PROVIDER_PRESETS[provider];
+  if (preset?.icon) return preset.icon;
+  const directMap = {
+    "302ai": "302ai",
+    aihubmix: "aihubmix",
+    anthropic: "anthropic",
+    azure: "openai",
+    baichuan: "baichuan",
+    baidu: "baidu",
+    bfl: "bfl",
+    cherryin: "cherryin",
+    deepseek: "deepseek",
+    doubao: "volcengine",
+    fireworks: "fireworks",
+    gemini: "gemini",
+    groq: "groq",
+    "grsai-gemini": "gemini",
+    hunyuan: "tencent",
+    kling: "kling",
+    "lm-studio": "lmstudio",
+    minimax: "minimax",
+    moonshot: "moonshot",
+    ollama: "ollama",
+    openai: "openai",
+    "openai-response": "openai",
+    openrouter: "openrouter",
+    qianfan: "baidu",
+    qwen: "aliyun",
+    replicate: "replicate",
+    siliconflow: "siliconflow",
+    stability: "stability",
+    together: "together",
+    xiaomi: "xiaomi",
+    zhipu: "zhipu",
+    zyapi: ""
+  };
+  if (Object.prototype.hasOwnProperty.call(directMap, text)) return directMap[text];
+  return "";
 }
 
 function normalizeProviderKey(value = "") {
@@ -753,6 +1532,11 @@ function normalizeProviderKey(value = "") {
 function getPromptProviderMeta() {
   const meta = state.config?.promptProviderMeta;
   return meta && typeof meta === "object" ? meta : {};
+}
+
+function getPromptProviderNotes() {
+  const notes = state.config?.promptProviderNotes;
+  return notes && typeof notes === "object" ? notes : {};
 }
 
 function getPromptProviderApiOptions() {
@@ -771,8 +1555,9 @@ function promptProviderPreset(provider = "") {
     return {
       ...API_PROVIDER_PRESETS.custom,
       label: meta.name || provider,
-      type: meta.type || "OpenAI",
+      type: meta.type || "openai",
       custom: true,
+      category: "custom",
       promptBaseUrl: meta.promptBaseUrl || "",
       promptEndpoint: meta.promptEndpoint || providerTypeToEndpoint(meta.type),
       promptModel: meta.promptModel || "",
@@ -792,6 +1577,11 @@ function providerTypeToEndpoint(type = "") {
 
 function promptProviderLabel(provider = "") {
   return promptProviderPreset(provider).label || provider || "自定义";
+}
+
+function isPromptRelayProvider(provider = currentSettingsProvider()) {
+  const preset = promptProviderPreset(provider);
+  return ["relay", "local", "custom"].includes(preset.category) || Boolean(preset.custom);
 }
 
 function allPromptProviders() {
@@ -819,10 +1609,10 @@ function inferModelCapabilities(model = "", provider = "") {
   const has = (patterns) => patterns.some((pattern) => pattern.test(text));
   const imageGeneration = has([/image/, /imagen/, /seedream/, /wanx/, /flux/, /stable/, /midjourney/]);
   return {
-    vision: !imageGeneration && has([/vision/, /\bvl\b/, /qwen.*vl/, /gemini/, /gpt-4o/, /gpt-4\.1/, /claude-3/, /mimo.*omni/, /omni/]),
-    web: has([/search/, /sonar/, /web/]),
-    reasoning: has([/reasoner/, /thinking/, /\br1\b/, /deepseek-r/, /o1/, /o3/, /o4/, /gpt-5/, /pro/, /glm-4\.5/, /gemini-2\.5/, /claude-3-7/, /claude-4/]),
-    tools: !imageGeneration && has([/gpt/, /openai/, /gemini/, /claude/, /qwen/, /doubao/, /glm/, /deepseek/, /mimo/]),
+    vision: !imageGeneration && has([/vision/, /\bvl\b/, /qwen.*vl/, /gemini/, /gpt-4o/, /gpt-4\.1/, /gpt-5/, /claude-3/, /claude.*sonnet/, /mimo.*omni/, /omni/, /ernie.*vl/, /hunyuan.*vision/]),
+    web: has([/search/, /sonar/, /web/, /online/]),
+    reasoning: has([/reasoner/, /thinking/, /\br1\b/, /deepseek-r/, /o1/, /o3/, /o4/, /gpt-5/, /pro/, /glm-4\.5/, /glm-5/, /gemini-2\.5/, /claude-3-7/, /claude-4/, /sonnet-4/, /opus-4/, /kimi-k2/, /x1/, /m1/]),
+    tools: !imageGeneration && has([/gpt/, /openai/, /gemini/, /claude/, /qwen/, /doubao/, /glm/, /deepseek/, /mimo/, /kimi/, /hunyuan/, /ernie/, /llama/, /minimax/]),
     rerank: has([/rerank/, /ranker/]),
     embedding: has([/embed/, /embedding/, /text-embedding/, /bge/, /voyage/])
   };
@@ -831,6 +1621,30 @@ function inferModelCapabilities(model = "", provider = "") {
 function modelCapabilities(provider, model) {
   const saved = getPromptModelCapabilitiesMap()[provider]?.[model];
   return { ...inferModelCapabilities(model, provider), ...(saved || {}) };
+}
+
+function promptModelCapabilitiesForConfig(config = {}) {
+  return modelCapabilities(config.promptProvider || "custom", config.promptModel || "");
+}
+
+function currentPromptModelCapabilities(scope = "image") {
+  return promptModelCapabilitiesForConfig(promptConfigForScope(scope));
+}
+
+function ensureVisionModelForImages(actionName = "AI analysis", scopeOrImages = "image", promptConfig = null) {
+  const images = Array.isArray(scopeOrImages) ? scopeOrImages : productImagesForScope(scopeOrImages);
+  if (!images.length) return true;
+  const config = promptConfig || (Array.isArray(scopeOrImages) ? promptConfigForScope("image") : promptConfigForScope(scopeOrImages));
+  const caps = promptModelCapabilitiesForConfig(config);
+  if (caps.vision) return true;
+  const provider = promptProviderLabel(config.promptProvider || "custom");
+  const model = config.promptModel || "not selected";
+  showMessageModal(
+    `${actionName} must use a multimodal vision model because product images are part of this task.\n\nCurrent prompt/vision model: ${provider} / ${model}\nPlease choose a model marked as vision-capable, then run the real connection test with vision enabled.`,
+    "Vision model required",
+    "error"
+  );
+  return false;
 }
 
 function setModelCapabilities(provider, model, capabilities) {
@@ -860,12 +1674,41 @@ function currentSettingsProvider() {
 }
 
 function currentPromptRequestInfo() {
-  const config = state.config || {};
+  return promptRequestInfoForScope("image");
+}
+
+function promptRequestInfoForScope(scope = "image") {
+  const config = promptConfigForScope(scope);
   const provider = config.promptProvider || "custom";
   const preset = promptProviderPreset(provider);
-  const baseUrl = config.promptBaseUrl || preset.promptBaseUrl || "";
+  const baseUrl = String(config.promptBaseUrl || "").replace(/\/+$/, "");
   const endpoint = config.promptEndpoint || preset.promptEndpoint || "chat";
-  const model = config.promptModel || preset.promptModel || "";
+  const model = config.promptModel || "";
+  const requestUrl = endpoint === "chat"
+    ? `${baseUrl}/chat/completions`
+    : endpoint === "responses"
+      ? `${baseUrl}/responses`
+      : endpoint === "gemini"
+        ? `${baseUrl}/models/${model || "{model}"}:generateContent`
+        : endpoint === "anthropic"
+          ? `${baseUrl}/messages`
+          : `${baseUrl}/chat/completions 或 /responses`;
+  return [
+    `供应商: ${preset.label || provider}`,
+    `模型: ${model || "未填写"}`,
+    `接口类型: ${endpoint}`,
+    `请求地址: ${requestUrl}`
+  ].join("\n");
+}
+
+function settingsPromptRequestInfo() {
+  const config = state.config || {};
+  const provider = currentSettingsProvider();
+  const preset = promptProviderPreset(provider);
+  const isSelectedProvider = config.promptProvider === provider;
+  const baseUrl = ($("#promptBaseUrl")?.value || (isSelectedProvider ? config.promptBaseUrl : "") || preset.promptBaseUrl || "").trim();
+  const endpoint = $("#promptEndpoint")?.value || (isSelectedProvider ? config.promptEndpoint : "") || preset.promptEndpoint || "chat";
+  const model = getSelectedPromptModel() || (isSelectedProvider ? config.promptModel : "") || preset.promptModel || "";
   const requestUrl = endpoint === "chat"
     ? `${String(baseUrl).replace(/\/+$/, "")}/chat/completions`
     : endpoint === "responses"
@@ -876,26 +1719,26 @@ function currentPromptRequestInfo() {
           ? `${String(baseUrl).replace(/\/+$/, "")}/messages`
           : `${String(baseUrl).replace(/\/+$/, "")}/chat/completions 或 /responses`;
   return [
-    `供应商: ${provider}`,
+    `供应商: ${preset.label || provider}`,
     `模型: ${model || "未填写"}`,
     `接口类型: ${endpoint}`,
     `请求地址: ${requestUrl}`
   ].join("\n");
 }
 
-function showPromptFailureModal(error, title, retryHandler) {
+function showPromptFailureModal(error, title, retryHandler, scope = "image") {
   const baseMessage = humanizeErrorMessage(error);
   const hasDebug = /请求地址:/.test(baseMessage);
   const message = hasDebug
     ? baseMessage
-    : `${baseMessage}\n\n当前 AI 分析模型配置：\n${currentPromptRequestInfo()}`;
+    : `${baseMessage}\n\n当前 AI 分析模型配置：\n${scope ? promptRequestInfoForScope(scope) : settingsPromptRequestInfo()}`;
   const canRetry = isTimeoutMessage(message) && typeof retryHandler === "function";
   showMessageModal(message, title, "error");
   configureErrorModalRetry(canRetry ? retryHandler : null);
 }
 
 function showAnalysisRequiredModal() {
-  showMessageModal("因您已修改产品描述信息，请重新点击 AI 自动分析。AI 重新分析后会刷新中间的商品识别、卖点和产品身份提示词，再继续生成图片。", "请先重新 AI 分析", "error");
+  showMessageModal("Product name or reference images changed. The app will re-analyze the product and generate a fresh category prompt plan when you start generation.", "Product analysis will refresh", "info");
 }
 
 function ensureSupportedImageGeneration(actionName = "图片生成") {
@@ -912,7 +1755,7 @@ function ensureSupportedImageGeneration(actionName = "图片生成") {
 }
 
 function closeImageTestModal(value = null) {
-  els.imageTestModal?.classList.add("hidden");
+  hideOverlay(els.imageTestModal);
   els.imageTestModelCustom?.classList.add("hidden");
   if (imageTestDialogResolver) {
     const resolve = imageTestDialogResolver;
@@ -927,10 +1770,77 @@ function selectedImageTestModel() {
   return value.trim();
 }
 
+function selectedPromptTestModel() {
+  const value = els.promptTestModelSelect?.value || "";
+  if (value === CUSTOM_MODEL_VALUE) return els.promptTestModelCustom?.value.trim() || "";
+  return value.trim();
+}
+
 function syncImageTestModelCustomInput() {
   const isCustom = els.imageTestModelSelect?.value === CUSTOM_MODEL_VALUE;
   els.imageTestModelCustom?.classList.toggle("hidden", !isCustom);
   if (isCustom) els.imageTestModelCustom?.focus();
+}
+
+function syncPromptTestModelCustomInput() {
+  const isCustom = els.promptTestModelSelect?.value === CUSTOM_MODEL_VALUE;
+  els.promptTestModelCustom?.classList.toggle("hidden", !isCustom);
+  if (isCustom) els.promptTestModelCustom?.focus();
+}
+
+function filterPromptTestModels() {
+  if (!els.promptTestModelSelect) return;
+  const query = String(els.promptTestModelSearch?.value || "").trim().toLowerCase();
+  const selected = selectedPromptTestModel();
+  const filtered = promptTestModelOptions.filter((model) => !query || model.toLowerCase().includes(query));
+  setSelectModelOptions("#promptTestModelSelect", "#promptTestModelCustom", filtered.length ? filtered : promptTestModelOptions, selected);
+  syncPromptTestModelCustomInput();
+}
+
+function closePromptTestModal(value = null) {
+  hideOverlay(els.promptTestModal);
+  els.promptTestModelCustom?.classList.add("hidden");
+  if (promptTestDialogResolver) {
+    const resolve = promptTestDialogResolver;
+    promptTestDialogResolver = null;
+    resolve(value);
+  }
+}
+
+function openPromptTestModelDialog(settings = {}, options = {}) {
+  const provider = settings.promptProvider || currentSettingsProvider();
+  const preset = promptProviderPreset(provider);
+  const selected = String(options.selectedModel || settings.promptModel || getSelectedPromptModel() || preset.promptModel || "").trim();
+  promptTestModelOptions = uniqueModelOptions([
+    selected,
+    settings.promptModel,
+    getSelectedPromptModel(),
+    getLastPromptModel(provider),
+    ...(getProviderModelOptions(provider) || []),
+    ...(preset.models || [])
+  ]);
+
+  if (!els.promptTestModal || !els.promptTestModelSelect) {
+    return Promise.resolve(selected);
+  }
+  if (els.promptTestProviderLabel) {
+    els.promptTestProviderLabel.textContent = `${preset.label || provider} · ${settings.promptEndpoint || preset.promptEndpoint || "chat"}`;
+  }
+  if (els.promptTestHint) {
+    const baseHint = options.forceVisionProbe
+      ? "这会真实发送文本 JSON 探测和一张极小测试图，确认当前模型是否能作为提示词/识图模型使用。"
+      : "这会真实调用一次当前供应商接口，确认 API 地址、Key、接口类型和所选模型是否能返回可解析 JSON。";
+    els.promptTestHint.textContent = provider === "doubao"
+      ? `${baseHint} 火山方舟如果使用推理接入点套餐，请选择“手动输入其他模型”并填 ep-... 接入点 ID。`
+      : baseHint;
+  }
+  if (els.promptTestModelSearch) els.promptTestModelSearch.value = "";
+  setSelectModelOptions("#promptTestModelSelect", "#promptTestModelCustom", promptTestModelOptions, selected);
+  syncPromptTestModelCustomInput();
+  showOverlay(els.promptTestModal);
+  return new Promise((resolve) => {
+    promptTestDialogResolver = resolve;
+  });
 }
 
 function openImageTestModelDialog(settings) {
@@ -956,57 +1866,187 @@ function openImageTestModelDialog(settings) {
     : "该供应商当前只支持保存配置；点击测试会返回无法真实出图检测的原因。";
   setSelectModelOptions("#imageTestModelSelect", "#imageTestModelCustom", models, selected);
   syncImageTestModelCustomInput();
-  els.imageTestModal.classList.remove("hidden");
+  showOverlay(els.imageTestModal);
 
   return new Promise((resolve) => {
     imageTestDialogResolver = resolve;
   });
 }
 
-function modelIconInfo(model = "") {
-  const key = modelIconKey(model, state.config?.promptProvider || "");
+function modelIconInfo(model = "", provider = state.config?.promptProvider || "") {
+  const key = modelIconKey(model, provider);
   return { key, src: iconPath(key), label: key === "chatgpt" ? "ChatGPT" : key };
+}
+
+function normalizePromptDisplayText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/\bTemu(?:\s+(?:US|EU|UK|CA|AU))?\s+(?=(?:main|hero|selling|SKU|real-shot|lifestyle|macro|A\+|detail|product|image))/gi, "")
+    .replace(/\bAmazon(?:\s+(?:US|EU|UK|CA|AU))?\s+(?=(?:main|hero|selling|SKU|real-shot|lifestyle|macro|A\+|detail|product|image))/gi, "")
+    .replace(/\bShopee(?:\s+[A-Z]{2})?\s+(?=(?:main|hero|selling|SKU|real-shot|lifestyle|macro|A\+|detail|product|image))/gi, "")
+    .replace(/\bEtsy(?:\s+[A-Z]{2})?\s+(?=(?:main|hero|selling|SKU|real-shot|lifestyle|macro|A\+|detail|product|image))/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function renderPlanningModelLabel() {
   if (!els.planningModelLabel) return;
   const promptModel = state.config?.promptModel || "当前提示词模型";
   const icon = modelIconInfo(promptModel);
-  els.planningModelLabel.innerHTML = `<img class="model-icon model-icon-img" src="${escapeHtml(icon.src)}" alt=""><span>${escapeHtml(promptModel)}</span>`;
+  const provider = promptProviderLabel(state.config?.promptProvider || currentSettingsProvider());
+  els.planningModelLabel.innerHTML = `<img class="model-icon model-icon-img" src="${escapeHtml(icon.src)}" alt=""><span>${escapeHtml(promptModel)}</span><small>${escapeHtml(provider)}</small>`;
+  renderMainPromptModelSelect(promptModel);
+}
+
+function renderPlanningModelLabel() {
+  renderAllPromptScopeControls();
 }
 
 function emptyTigerMarkup(mode = "sleeping") {
-  const text = mode === "working" ? "正在生成图片，请稍候" : "暂无生成结果";
-  return `
-    <div class="empty-result-state" aria-label="${escapeHtml(text)}">
-      <span class="empty-result-icon">AI</span>
-      <strong>${escapeHtml(text)}</strong>
-      <small>${mode === "working" ? "任务已提交后会在这里显示每张图片进度" : "上传产品图并完成 AI 分析后即可生成套图"}</small>
-    </div>
-  `;
+  return "";
 }
 
 function closeErrorModal() {
-  els.errorModal.classList.add("hidden");
+  hideOverlay(els.errorModal);
   els.errorModalMessage.textContent = "";
   els.errorModal.querySelector(".error-card")?.classList.remove("success");
   configureErrorModalRetry(null);
 }
 
+function closeUpdateModal() {
+  hideOverlay(els.updateModal);
+}
+
+function updateNotesText(update = {}) {
+  const notes = Array.isArray(update.notes) ? update.notes.filter(Boolean) : [];
+  if (notes.length) return notes.map((item) => `- ${item}`).join("\n");
+  return update.summary || "此版本提供了新的修复和优化。";
+}
+
+function showUpdateModal(update = {}) {
+  state.update.latest = update;
+  if (!els.updateModal) return;
+  if (els.updateModalVersion) {
+    els.updateModalVersion.textContent = `当前版本 ${update.currentVersion || ""}，最新版本 ${update.latestVersion || ""}`;
+  }
+  if (els.updateModalSummary) {
+    els.updateModalSummary.textContent = update.summary || "检测到可安装的新版本。此更新不会强制安装，你可以自行选择更新时间。";
+  }
+  if (els.updateModalNotes) {
+    els.updateModalNotes.textContent = updateNotesText(update);
+  }
+  showOverlay(els.updateModal);
+}
+
+function updateRemindLaterUntil() {
+  return Number(localStorage.getItem(UPDATE_REMIND_LATER_STORAGE_KEY) || 0);
+}
+
+function shouldSkipStartupUpdatePrompt() {
+  return updateRemindLaterUntil() > Date.now();
+}
+
+function setUpdateStatus(message = "") {
+  if (els.updateActionStatus) els.updateActionStatus.textContent = message;
+}
+
+async function openUpdateDownload() {
+  const update = state.update.latest || {};
+  if (!update.downloadUrl) {
+    showMessageModal("更新清单里没有提供下载地址，请检查 downloadUrl 字段。", "无法立即更新", "error");
+    return;
+  }
+  await window.studio.openUpdateUrl(update.downloadUrl);
+  closeUpdateModal();
+}
+
+async function openUpdateNotes() {
+  const update = state.update.latest || {};
+  const notesUrl = update.releaseNotesUrl || update.releaseUrl || "";
+  if (!notesUrl) {
+    showMessageModal(updateNotesText(update), "更新内容", "info");
+    return;
+  }
+  await window.studio.openUpdateUrl(notesUrl);
+}
+
+function remindUpdateLater() {
+  localStorage.setItem(UPDATE_REMIND_LATER_STORAGE_KEY, String(Date.now() + 12 * 60 * 60 * 1000));
+  closeUpdateModal();
+  toast("已设置稍后提醒。");
+}
+
+async function checkForUpdates(options = {}) {
+  const manual = Boolean(options.manual);
+  const manifestUrl = String(els.updateManifestUrl?.value || state.config?.updateManifestUrl || "").trim();
+  if (!manifestUrl) {
+    const message = "请先填写更新清单地址。";
+    if (manual) {
+      setUpdateStatus(message);
+      showMessageModal(message, "无法检查更新", "error");
+    }
+    return null;
+  }
+  if (!manual && shouldSkipStartupUpdatePrompt()) return null;
+  if (state.update.checking) return null;
+
+  state.update.checking = true;
+  if (els.checkUpdateBtn) els.checkUpdateBtn.disabled = true;
+  if (manual) setUpdateStatus("正在检查更新...");
+  try {
+    const result = await window.studio.checkUpdate({ updateManifestUrl: manifestUrl });
+    state.update.latest = result;
+    if (result?.hasUpdate) {
+      if (manual) setUpdateStatus(`发现新版本 ${result.latestVersion}`);
+      showUpdateModal(result);
+    } else if (manual) {
+      setUpdateStatus(`当前已是最新版本 ${result?.currentVersion || ""}`);
+      showMessageModal(`当前已是最新版本：${result?.currentVersion || ""}`, "无需更新", "success");
+    }
+    return result;
+  } catch (error) {
+    const message = shortErrorMessage(error);
+    if (manual) {
+      setUpdateStatus(`检查更新失败：${message}`);
+      showMessageModal(`检查更新失败：${message}`, "检查更新失败", "error");
+    }
+    return null;
+  } finally {
+    state.update.checking = false;
+    if (els.checkUpdateBtn) els.checkUpdateBtn.disabled = false;
+  }
+}
+
+function scheduleStartupUpdateCheck() {
+  if (state.config?.updateCheckOnStartup === false) return;
+  if (!String(state.config?.updateManifestUrl || "").trim()) return;
+  window.setTimeout(() => {
+    checkForUpdates({ manual: false }).catch(() => {});
+  }, 1800);
+}
+
 function setBusy(isBusy, label) {
-  els.analyzeBtn.disabled = isBusy;
+  if (els.analyzeBtn) els.analyzeBtn.disabled = isBusy;
   els.generateBtn.disabled = isBusy;
-  els.analyzeBtn.classList.toggle("ai-running", isBusy && /AI|识别|分析/.test(String(label || "")));
+  if (els.aplusAnalyzeBtn) els.aplusAnalyzeBtn.disabled = isBusy;
+  if (els.aplusGenerateBtn) els.aplusGenerateBtn.disabled = isBusy;
+  els.analyzeBtn?.classList.toggle("ai-running", isBusy && /AI|识别|分析/.test(String(label || "")));
   els.generateBtn.classList.toggle("ai-running", isBusy && /生成|提交|Grsai/.test(String(label || "")));
+  els.aplusAnalyzeBtn?.classList.toggle("ai-running", isBusy && /A\+|AI/.test(String(label || "")));
+  els.aplusGenerateBtn?.classList.toggle("ai-running", isBusy && /A\+|生成/.test(String(label || "")));
   if (els.titleGenerateBtn) els.titleGenerateBtn.disabled = isBusy;
   if (els.titleGenerateBtn) els.titleGenerateBtn.classList.toggle("ai-running", isBusy && /标题/.test(String(label || "")));
   if (els.cutoutDropzone && !state.cutoutGenerating) els.cutoutDropzone.classList.toggle("disabled", isBusy);
   if (els.titleDropzone) els.titleDropzone.classList.toggle("disabled", isBusy);
-  if (label) els.statusLine.textContent = label;
+  if (label) {
+    const statusLine = scopedStatusLine(state.activeGenerationView || state.route);
+    if (statusLine) statusLine.textContent = label;
+  }
 }
 
 function updateApiState() {
-  const promptReady = Boolean(state.config?.promptApiKey);
+  const promptReady = Boolean(state.config?.promptApiKey || Object.values(getPromptProviderKeys()).some((key) => String(key || "").trim()));
   const imageProvider = state.config?.imageProvider || "grsai";
   const imageReady = Boolean(getSavedImageApiKey(imageProvider) || state.config?.imageApiKey || state.config?.grsaiApiKey);
   els.apiState.textContent = imageReady ? (promptReady ? "API 已配置" : "作图 API 已配置") : "API 未配置";
@@ -1033,7 +2073,7 @@ function normalizeResolution(value) {
 
 function normalizeImageModelRoute(value) {
   const text = String(value || "").trim();
-  if (text === "auto" || GRSAI_IMAGE_MODEL_INFO[text]) return text;
+  if (text) return text;
   return "auto";
 }
 
@@ -1059,11 +2099,11 @@ function imageModelStrength(model) {
   const info = getModelInfo(model);
   if (info?.strength) return info.strength;
   const text = String(model || "").toLowerCase();
-  if (/ultra|max|vip|pro|plus|4k/.test(text)) return "高级质量，适合一致性、复杂场景和细节控制。";
-  if (/fast|turbo|schnell|core|flash/.test(text)) return "速度优先，适合快速试图和常规图片。";
+  if (/ultra|max|vip|pro|plus|4k/.test(text)) return "高质量生图模型，适合一致性、复杂场景和细节控制。";
+  if (/fast|turbo|schnell|core|flash/.test(text)) return "速度优先生图模型，适合快速试图和常规图片。";
   return imageModelTier(model) === "advanced"
-    ? "高级模型，适合更强的一致性、场景和细节控制。"
-    : "普通模型，适合日常套图和快速生成。";
+    ? "偏高质量生图模型，适合更强的一致性、场景和细节控制。"
+    : "稳定生图模型，适合日常套图和快速生成。";
 }
 
 function supportsModelResolution(model, resolution) {
@@ -1077,14 +2117,59 @@ function resolveCurrentImageModel() {
   const route = normalizeImageModelRoute(state.imageModelRoute || state.config?.imageModelRoute);
   if (route !== "auto") return route;
   const resolution = normalizeResolution(state.resolution);
-  if (state.imageModelTier === "advanced") {
-    return resolution === "1K"
-      ? (state.config?.image2kModel || state.config?.grsai2kModel || "gpt-image-2-vip")
-      : (state.config?.image2kModel || state.config?.grsai2kModel || "gpt-image-2-vip");
+  if (resolution === "1K") {
+    return state.config?.image1kModel
+      || state.config?.grsai1kModel
+      || state.config?.image2kModel
+      || state.config?.grsai2kModel
+      || "gpt-image-2";
   }
-  return resolution === "1K"
-    ? (state.config?.image1kModel || state.config?.grsai1kModel || "gpt-image-2")
-    : "nano-banana";
+  return state.config?.image2kModel
+    || state.config?.grsai2kModel
+    || state.config?.image1kModel
+    || state.config?.grsai1kModel
+    || "nano-banana";
+}
+
+function getFeatureImageModelRoutes() {
+  const stored = state.config?.featureImageModelRoutes;
+  return stored && typeof stored === "object" ? stored : {};
+}
+
+function featureImageModelRoute(scope = "image") {
+  const key = normalizeResultScope(scope);
+  if (key === "image") return normalizeImageModelRoute(state.imageModelRoute || state.config?.imageModelRoute);
+  return normalizeImageModelRoute(
+    state.featureImageModelRoutes?.[key]
+      || getFeatureImageModelRoutes()[key]
+      || "auto"
+  );
+}
+
+function setFeatureImageModelRoute(scope = "image", route = "auto") {
+  const key = normalizeResultScope(scope);
+  if (key === "image") {
+    state.imageModelRoute = normalizeImageModelRoute(route);
+    return;
+  }
+  state.featureImageModelRoutes = {
+    ...(state.featureImageModelRoutes || {}),
+    [key]: normalizeImageModelRoute(route)
+  };
+  state.config = {
+    ...(state.config || {}),
+    featureImageModelRoutes: {
+      ...getFeatureImageModelRoutes(),
+      ...state.featureImageModelRoutes
+    }
+  };
+}
+
+function resolveImageModelForScope(scope = "image") {
+  const key = normalizeResultScope(scope);
+  if (key === "image") return resolveCurrentImageModel();
+  const route = featureImageModelRoute(key);
+  return route === "auto" ? resolveCurrentImageModel() : route;
 }
 
 function compatibleResolutionsForModel(model) {
@@ -1140,7 +2225,7 @@ function updateImageModelUi() {
   const tier = imageModelTier(model);
   state.imageModelTier = normalizeImageModelTier(state.imageModelTier || tier);
   if (els.imageModelTierBadge) {
-    els.imageModelTierBadge.textContent = tier === "advanced" ? "高级模型" : "普通模型";
+    els.imageModelTierBadge.textContent = "生图模型";
     els.imageModelTierBadge.classList.toggle("advanced", tier === "advanced");
     els.imageModelTierBadge.closest(".image-model-card")?.classList.toggle("advanced-model-card", tier === "advanced");
   }
@@ -1162,10 +2247,110 @@ function updateImageModelUi() {
       ? `当前模型不支持 ${state.resolution}，请切换模型或分辨率。`
       : `当前生图模型：${model}，目标画幅 ${state.ratio}，接口将按像素尺寸强制输出。`;
   }
-  $$("#modelTierTabs button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.tier === state.imageModelTier);
-  });
   syncProviderModelIcons();
+}
+
+function imageModelRouteOptions() {
+  const provider = state.config?.imageProvider || $("#imageProvider")?.value || "grsai";
+  return uniqueModelOptions([
+    state.config?.image1kModel,
+    state.config?.image2kModel,
+    state.config?.grsai1kModel,
+    state.config?.grsai2kModel,
+    getSelectedModelValue?.("#grsai1kModel", "#grsai1kModelCustom"),
+    getSelectedModelValue?.("#grsai2kModel", "#grsai2kModelCustom"),
+    ...(getImageProviderModelOptions(provider) || []),
+    ...GRSAI_IMAGE_MODELS
+  ]);
+}
+
+function aiImageModelOptions(provider = state.config?.imageProvider || $("#imageProvider")?.value || "grsai") {
+  return uniqueModelOptions([
+    state.config?.image1kModel,
+    state.config?.image2kModel,
+    state.config?.grsai1kModel,
+    state.config?.grsai2kModel,
+    normalizeImageModelRoute(state.config?.imageModelRoute || "") !== "auto" ? state.config?.imageModelRoute : "",
+    getLastImageModel(provider, "route"),
+    ...(getImageProviderModelOptions(provider) || [])
+  ]);
+}
+
+function selectedAiImageModel() {
+  const select = els.aiImageModelSelect;
+  const custom = els.aiImageModelCustom;
+  if (!select) return "";
+  if (select.value === CUSTOM_MODEL_VALUE) return custom?.value.trim() || "";
+  return String(select.value || "").trim();
+}
+
+function resolveAiImageModel() {
+  const selected = selectedAiImageModel();
+  if (selected) return selected;
+  const stored = normalizeImageModelRoute(state.ai.imageModelRoute || "");
+  if (stored && stored !== "auto") return stored;
+  return resolveCurrentImageModel();
+}
+
+function populateAiImageModelSelect() {
+  if (!els.aiImageModelSelect || !els.aiImageModelCustom) return;
+  const provider = state.config?.imageProvider || $("#imageProvider")?.value || "grsai";
+  const models = aiImageModelOptions(provider);
+  const current = normalizeImageModelRoute(state.ai.imageModelRoute || "");
+  const providerLast = getLastImageModel(provider, "route");
+  const configRoute = normalizeImageModelRoute(state.config?.imageModelRoute || "");
+  const selected = [
+    current !== "auto" && models.includes(current) ? current : "",
+    providerLast && models.includes(providerLast) ? providerLast : "",
+    configRoute !== "auto" && models.includes(configRoute) ? configRoute : "",
+    state.config?.image1kModel && models.includes(state.config.image1kModel) ? state.config.image1kModel : "",
+    models[0] || ""
+  ].find(Boolean) || "";
+  els.aiImageModelSelect.innerHTML = "";
+  for (const model of models) {
+    const info = getModelInfo(model);
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = `${model}${info?.supportText ? ` · ${info.supportText}` : ""}`;
+    els.aiImageModelSelect.appendChild(option);
+  }
+  const customOption = document.createElement("option");
+  customOption.value = CUSTOM_MODEL_VALUE;
+  customOption.textContent = "手动输入其他模型";
+  els.aiImageModelSelect.appendChild(customOption);
+  if (selected !== "auto" && models.includes(selected)) {
+    els.aiImageModelSelect.value = selected;
+    els.aiImageModelCustom.classList.add("hidden");
+    els.aiImageModelCustom.value = "";
+  } else if (models.length) {
+    els.aiImageModelSelect.value = models[0];
+    state.ai.imageModelRoute = models[0];
+    els.aiImageModelCustom.classList.add("hidden");
+    els.aiImageModelCustom.value = "";
+  } else {
+    els.aiImageModelSelect.value = CUSTOM_MODEL_VALUE;
+    els.aiImageModelCustom.classList.remove("hidden");
+  }
+}
+
+async function persistAiImageModelSelection() {
+  const selected = selectedAiImageModel();
+  if (!selected) return;
+  state.ai.imageModelRoute = selected;
+  const provider = state.config?.imageProvider || "grsai";
+  const imageProviderLastModels = {
+    ...getImageProviderLastModels(),
+    [`${provider}:route`]: selected
+  };
+  const imageProviderModels = {
+    ...getImageProviderModels(),
+    [provider]: uniqueModelOptions([selected, ...(getImageProviderModels()[provider] || [])]).slice(0, 200)
+  };
+  state.config = await window.studio.saveConfig({
+    ...state.config,
+    imageProviderLastModels,
+    imageProviderModels
+  });
 }
 
 function populateModelRouteSelect() {
@@ -1173,22 +2358,20 @@ function populateModelRouteSelect() {
   if (!select) return;
   const selected = normalizeImageModelRoute(state.imageModelRoute || state.config?.imageModelRoute);
   const previousValue = select.value;
-  const tier = normalizeImageModelTier(state.imageModelTier);
-  const effectiveSelected = selected !== "auto" && imageModelTier(selected) !== tier ? "auto" : selected;
-  if (state.imageModelRoute !== effectiveSelected) {
-    state.imageModelRoute = effectiveSelected;
-  }
+  const effectiveSelected = selected;
+  if (state.imageModelRoute !== effectiveSelected) state.imageModelRoute = effectiveSelected;
+  const models = imageModelRouteOptions();
   select.innerHTML = "";
   const autoModel = resolveCurrentImageModel();
   const auto = document.createElement("option");
   auto.value = "auto";
   auto.textContent = `自动：${autoModel}`;
   select.appendChild(auto);
-  for (const model of GRSAI_IMAGE_MODELS.filter((item) => imageModelTier(item) === tier)) {
+  for (const model of models) {
     const info = getModelInfo(model);
     const option = document.createElement("option");
     option.value = model;
-    option.textContent = `${model} · ${info?.supportText || "官方直连"}`;
+    option.textContent = `${model}${info?.supportText ? ` · ${info.supportText}` : ""}`;
     select.appendChild(option);
   }
   if (effectiveSelected !== "auto" && [...select.options].some((option) => option.value === effectiveSelected)) {
@@ -1199,17 +2382,58 @@ function populateModelRouteSelect() {
   if (previousValue !== select.value) {
     select.title = select.value === "auto" ? "自动选择当前等级模型" : select.value;
   }
+  populateAiImageModelSelect();
+}
+
+function populateFeatureImageModelRouteSelect(scope = "aplus") {
+  const key = normalizeResultScope(scope);
+  const select = key === "aplus" ? els.aplusImageModelRoute : null;
+  if (!select) return;
+  const selected = featureImageModelRoute(key);
+  const models = uniqueModelOptions([selected !== "auto" ? selected : "", ...imageModelRouteOptions()]);
+  select.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "auto";
+  auto.textContent = `自动：${resolveCurrentImageModel()}`;
+  select.appendChild(auto);
+  for (const model of models) {
+    const info = getModelInfo(model);
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = `${model}${info?.supportText ? ` · ${info.supportText}` : ""}`;
+    select.appendChild(option);
+  }
+  if (selected !== "auto" && [...select.options].some((option) => option.value === selected)) {
+    select.value = selected;
+  } else {
+    select.value = "auto";
+  }
+  select.title = select.value === "auto" ? "跟随图片制作页当前生图模型" : select.value;
+}
+
+function syncFeatureImageModelRouteUi(scope = "aplus") {
+  const key = normalizeResultScope(scope);
+  if (key === "image") return;
+  populateFeatureImageModelRouteSelect(key);
+  const model = resolveImageModelForScope(key);
+  const select = key === "aplus" ? els.aplusImageModelRoute : null;
+  select?.classList.toggle("model-resolution-warning", !supportsModelResolution(model, state.resolution));
+}
+
+function syncAllFeatureImageModelRouteUi() {
+  syncFeatureImageModelRouteUi("aplus");
 }
 
 function syncImageModelRouteUi() {
   ensureResolutionSupported();
   syncResolutionButtons();
   populateModelRouteSelect();
+  syncAllFeatureImageModelRouteUi();
   updateImageModelUi();
 }
 
-function getProductUploadStatusText() {
-  const uploaded = state.images.length;
+function getProductUploadStatusText(scope = "image") {
+  const uploaded = productImagesForScope(scope).length;
   const remaining = Math.max(0, PRODUCT_IMAGE_LIMIT - uploaded);
   return `已上传 ${uploaded} 张，还可以上传 ${remaining} 张图片；10M 以内，最多 ${PRODUCT_IMAGE_LIMIT} 张，支持拖拽上传`;
 }
@@ -1308,8 +2532,50 @@ async function imageUrlToDataUrl(url) {
   return fileToDataUrl(blob);
 }
 
-async function addFiles(files) {
-  const remaining = Math.max(0, PRODUCT_IMAGE_LIMIT - state.images.length);
+function compactImageDataUrl(dataUrl, maxSide = 768, quality = 0.78) {
+  return new Promise((resolve) => {
+    const value = String(dataUrl || "");
+    if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(value)) {
+      resolve(value);
+      return;
+    }
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+        const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+        const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        context.fillStyle = "#fff";
+        context.fillRect(0, 0, width, height);
+        context.drawImage(image, 0, 0, width, height);
+        const compacted = canvas.toDataURL("image/jpeg", quality);
+        resolve(compacted && compacted.length < value.length ? compacted : value);
+      } catch {
+        resolve(value);
+      }
+    };
+    image.onerror = () => resolve(value);
+    image.src = value;
+  });
+}
+
+async function compactPromptImages(images = [], limit = 1, maxSide = 768) {
+  const source = (Array.isArray(images) ? images : []).filter(Boolean).slice(0, limit);
+  const compacted = [];
+  for (const image of source) {
+    compacted.push(await compactImageDataUrl(image, maxSide));
+  }
+  return compacted.filter(Boolean);
+}
+
+async function addFiles(files, scope = "image") {
+  const key = normalizeResultScope(scope);
+  const images = productImagesForScope(key);
+  const remaining = Math.max(0, PRODUCT_IMAGE_LIMIT - images.length);
   const accepted = Array.from(files).filter((file) => file.type.startsWith("image/")).slice(0, remaining);
   if (!accepted.length && files.length) {
     toast(`最多上传 ${PRODUCT_IMAGE_LIMIT} 张真实产品图。`, "error");
@@ -1320,9 +2586,11 @@ async function addFiles(files) {
       continue;
     }
     const dataUrl = await fileToDataUrl(file);
-    state.images.push({ name: file.name, dataUrl });
+    images.push({ name: file.name, dataUrl });
   }
-  renderThumbs();
+  if (accepted.length && key === "image") markProductFactsEdited();
+  if (key === "aplus") renderAplusThumbs();
+  else renderThumbs();
 }
 
 async function addImageUrlToProductImages(url, name = `white-background-${Date.now()}.png`) {
@@ -1339,6 +2607,7 @@ async function addImageUrlToProductImages(url, name = `white-background-${Date.n
     }
   }
   state.images.push({ name, dataUrl });
+  markProductFactsEdited();
   renderThumbs();
   return true;
 }
@@ -1361,12 +2630,14 @@ function renderThumbs() {
   els.thumbs.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
       state.images.splice(Number(button.dataset.index), 1);
+      markProductFactsEdited();
       renderThumbs();
     });
   });
 
   updateProductUploadStatus();
   renderTitleThumbs();
+  renderAplusThumbs();
 }
 
 function renderTitleThumbs() {
@@ -1388,6 +2659,7 @@ function renderTitleThumbs() {
   els.titleThumbs.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", () => {
       state.images.splice(Number(button.dataset.index), 1);
+      markProductFactsEdited();
       renderThumbs();
     });
   });
@@ -1446,10 +2718,15 @@ async function handleCutoutImageDrop(event) {
 }
 
 function getImageKindPlans() {
-  const plans = $$('input[name="imageKind"]:checked').map((input) => ({
-    kind: input.value,
-    count: Math.max(0, Number(state.kindCounts[input.value] || 0))
-  }));
+  const plans = $$('input[name="imageKind"]:checked').map((input) => {
+    const row = input.closest(".kind-row");
+    const key = row?.dataset.kind || input.value;
+    return {
+      kind: input.value,
+      module: row?.dataset.module || "",
+      count: Math.max(0, Number(state.kindCounts[key] || 0))
+    };
+  });
   const seen = new Set();
   return plans.filter((item) => {
     if (item.count <= 0) return false;
@@ -1462,44 +2739,61 @@ function getImageKindPlans() {
 function updateTotalCount() {
   const total = getImageKindPlans().reduce((sum, item) => sum + item.count, 0);
   els.totalCountValue.textContent = String(total);
-  els.aPlusOptions.classList.toggle("hidden", !getImageKindPlans().some((item) => item.kind === "高级A+"));
+  els.aPlusOptions?.classList.add("hidden");
   updateImageModelUi();
+}
+
+function syncSuiteModeUi() {
+  state.suiteMode = "custom";
+  els.suiteCustomPanel?.classList.remove("hidden");
+  updateTotalCount();
 }
 
 function productModeCopy(mode = "single") {
   const copies = {
     single: {
-      title: "填写单品信息",
-      caption: "写清名称和用途，AI 会结合图片自动补全卖点和分镜。",
+      title: "填写产品名称",
+      caption: "填写名称和必要事实，可用 AI帮写生成短商品事实，确认后再生成图片。",
       nameLabel: "产品名称",
       namePlaceholder: "请填写产品名称",
-      infoLabel: "产品描述",
-      infoPlaceholder: "请填写有关产品的使用方式或者产品的卖点",
+      infoLabel: "商品卖点&要求",
+      infoPlaceholder: "建议包含：1.产品名称 2.核心卖点 3.适用人群 4.使用场景 5.具体参数。",
       hint: "单品：围绕一个产品和真实使用关系生成套图。",
-      tips: "建议补充：使用场景、适配对象、核心卖点、销售地区或发布平台。"
+      tips: "单品只需要名称、购买单位和正确使用关系；不需要写长篇提示词。"
     },
     bundle: {
-      title: "填写组合装信息",
-      caption: "说明每个组件的作用和搭配关系，避免 AI 把套装拆错。",
+      title: "填写组合装名称",
+      caption: "组合装需要写清组件、每件差异和完整购买单位。",
       nameLabel: "组合装产品名称",
       namePlaceholder: "请填写组合装产品名称",
-      infoLabel: "组合装说明",
-      infoPlaceholder: "请填写组合内容、各组件用途、数量/规格、搭配关系和主卖点",
+      infoLabel: "商品卖点&要求",
+      infoPlaceholder: "建议写清组件、数量、核心卖点、适用人群、使用场景和必须保留的参数。",
       hint: "组合装：强调组件关系、完整购买单位和搭配价值。",
-      tips: "建议补充：组件清单、各组件数量、适配对象、主件/配件关系、不能被替换或遗漏的细节。"
+      tips: "组合装重点是组件清单、每件差异、是否全部出镜，避免 AI 把套装改成单品。"
     },
     multipack: {
-      title: "填写多PCS装信息",
-      caption: "说明数量、包装方式和消耗场景，让套图体现整包价值。",
+      title: "填写多PCS装名称",
+      caption: "多PCS装需要填写 PCS 数量和包装/排列方式。",
       nameLabel: "多PCS装产品名称",
       namePlaceholder: "请填写多PCS装产品名称",
-      infoLabel: "数量与用途说明",
-      infoPlaceholder: "请填写件数、包装方式、消耗/补充场景、适用对象和核心卖点；数量不确定可写“以图片为准”",
+      infoLabel: "商品卖点&要求",
+      infoPlaceholder: "建议写清数量、包装、核心卖点、适用人群、使用场景和必须保留的参数。",
       hint: "多PCS装：突出可数排列、整包价值、补充周期或高频使用。",
-      tips: "建议补充：明确件数、单次使用方式、整包/开包展示、堆叠或排列要求、是否允许显示数量文字。"
+      tips: "多PCS装重点是数量、整包价值、可数排列或包装密度，避免 AI 随机增减数量。"
     }
   };
   return copies[mode] || copies.single;
+}
+
+function buildPackageInputs() {
+  return {
+    unitOfSale: els.unitOfSaleInput?.value.trim() || "",
+    bundleComponents: els.bundleComponentsInput?.value.trim() || "",
+    componentDifferences: els.componentDifferencesInput?.value.trim() || "",
+    pcsCount: els.pcsCountInput?.value.trim() || "",
+    packArrangement: els.packArrangementInput?.value.trim() || "",
+    usageNotes: els.usageNotesInput?.value.trim() || ""
+  };
 }
 
 function buildProductInfoText() {
@@ -1507,24 +2801,546 @@ function buildProductInfoText() {
   const copy = productModeCopy(mode);
   const name = els.productName?.value.trim() || "";
   const details = els.productInfo?.value.trim() || "";
+  const packageInputs = buildPackageInputs();
   const modeLabel = mode === "bundle" ? "组合装" : mode === "multipack" ? "多PCS装" : "单品";
   return [
     `产品形态：${modeLabel}`,
     name ? `${copy.nameLabel}：${name}` : "",
+    packageInputs.unitOfSale ? `购买单位：${packageInputs.unitOfSale}` : "",
+    mode === "bundle" && packageInputs.bundleComponents ? `组件清单：${packageInputs.bundleComponents}` : "",
+    mode === "bundle" && packageInputs.componentDifferences ? `组件差异/出镜：${packageInputs.componentDifferences}` : "",
+    mode === "multipack" && packageInputs.pcsCount ? `PCS数量：${packageInputs.pcsCount}` : "",
+    mode === "multipack" && packageInputs.packArrangement ? `包装/排列：${packageInputs.packArrangement}` : "",
+    packageInputs.usageNotes ? `正确使用/材质结构：${packageInputs.usageNotes}` : "",
     details ? `${copy.infoLabel}：${details}` : ""
   ].filter(Boolean).join("\n");
 }
 
 function currentProductFactsSignature() {
+  const imageFacts = state.images.map((image) => {
+    const data = String(image.dataUrl || "");
+    return {
+      name: image.name || "",
+      length: data.length,
+      head: data.slice(0, 80),
+      tail: data.slice(-80)
+    };
+  });
   return JSON.stringify({
     productPackageMode: state.productPackageMode || "single",
     productName: (els.productName?.value || "").trim(),
-    productInfo: (els.productInfo?.value || "").trim()
+    productInfo: (els.productInfo?.value || "").trim(),
+    packageInputs: buildPackageInputs(),
+    images: imageFacts
   });
 }
 
+function renderSharedProductThumbs(target, scope = "image") {
+  if (!target) return;
+  const key = normalizeResultScope(scope);
+  const images = productImagesForScope(key);
+  target.innerHTML = "";
+  for (const [index, image] of images.entries()) {
+    const item = document.createElement("div");
+    item.className = "thumb";
+    item.innerHTML = `
+      <img src="${image.dataUrl}" alt="">
+      <button title="移除" data-index="${index}">×</button>
+    `;
+    target.appendChild(item);
+    item.querySelector("img")?.addEventListener("click", () => {
+      openImageViewer(image.dataUrl, image.name || `产品图 ${index + 1}`);
+    });
+  }
+  target.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => {
+      images.splice(Number(button.dataset.index), 1);
+      if (key === "image") {
+        markProductFactsEdited();
+        syncAllProductThumbs();
+      } else if (key === "aplus") {
+        renderAplusThumbs();
+      }
+    });
+  });
+}
+
+function syncAllProductThumbs() {
+  renderThumbs();
+  renderAplusThumbs();
+}
+
+function renderAplusThumbs() {
+  renderSharedProductThumbs(els.aplusThumbs, "aplus");
+  if (els.aplusUploadHint) els.aplusUploadHint.textContent = getProductUploadStatusText("aplus");
+}
+
+function renderAiThumbs() {
+  if (!els.aiThumbs) return;
+  els.aiThumbs.innerHTML = "";
+  for (const [index, image] of state.ai.images.entries()) {
+    const item = document.createElement("div");
+    item.className = "thumb";
+    item.innerHTML = `
+      <img src="${image.dataUrl}" alt="">
+      <button title="移除" data-index="${index}">×</button>
+    `;
+    item.querySelector("img")?.addEventListener("click", () => openImageViewer(image.dataUrl, image.name || `参考图 ${index + 1}`));
+    item.querySelector("button")?.addEventListener("click", () => {
+      state.ai.images.splice(index, 1);
+      renderAiThumbs();
+      if (els.aiStatusLine) {
+        els.aiStatusLine.textContent = state.ai.images.length ? `已上传 ${state.ai.images.length} 张参考图` : "等待输入";
+      }
+    });
+    els.aiThumbs.appendChild(item);
+  }
+  if (els.aiUploadHint) {
+    const remaining = Math.max(0, AI_REFERENCE_IMAGE_LIMIT - state.ai.images.length);
+    els.aiUploadHint.textContent = `已上传 ${state.ai.images.length} 张，还可上传 ${remaining} 张`;
+  }
+}
+
+function formatFileSize(bytes = 0) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 KB";
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / 1024 / 1024).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function fileExtension(name = "") {
+  const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1].toUpperCase() : "FILE";
+}
+
+function createAiAttachmentId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `ai-file-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function aiFileStatusLabel(file = {}) {
+  if (file.reading) return "读取中";
+  if (file.error) return "读取失败";
+  if (file.readable) return `可分析 · ${formatFileSize(file.size)}`;
+  return `文件信息 · ${formatFileSize(file.size)}`;
+}
+
+function renderAiFileChips() {
+  if (!els.aiFileChips) return;
+  els.aiFileChips.innerHTML = "";
+  const files = state.ai.files || [];
+  els.aiFileChips.classList.toggle("hidden", !files.length);
+  for (const [index, file] of files.entries()) {
+    const item = document.createElement("div");
+    item.className = `ai-file-chip${file.reading ? " loading" : ""}${file.error ? " error" : ""}`;
+    item.innerHTML = `
+      <span class="ai-file-type">${escapeHtml(fileExtension(file.name))}</span>
+      <span class="ai-file-main">
+        <strong>${escapeHtml(file.name || `文件 ${index + 1}`)}</strong>
+        <small>${escapeHtml(aiFileStatusLabel(file))}</small>
+      </span>
+      <button type="button" title="移除文件" data-index="${index}">×</button>
+    `;
+    item.querySelector("button")?.addEventListener("click", () => {
+      state.ai.files.splice(index, 1);
+      renderAiFileChips();
+      updateAiDocumentHint();
+    });
+    els.aiFileChips.appendChild(item);
+  }
+  updateAiDocumentHint();
+}
+
+function updateAiDocumentHint() {
+  if (!els.aiDocumentHint) return;
+  const files = state.ai.files || [];
+  const remaining = Math.max(0, AI_FILE_LIMIT - files.length);
+  els.aiDocumentHint.textContent = files.length
+    ? `已上传 ${files.length} 个文件，还可上传 ${remaining} 个`
+    : "文本类文件会读取内容；其他文件会附带文件信息";
+}
+
+async function readAiDocument(file) {
+  const base = {
+    name: file.name || "未命名文件",
+    type: file.type || "",
+    size: file.size || 0,
+    readable: false,
+    text: "",
+    note: "",
+    reading: true
+  };
+  try {
+    const dataUrl = await fileToDataUrl(file);
+    const output = await window.studio.readAiFile({
+      name: base.name,
+      type: base.type,
+      size: base.size,
+      dataUrl
+    });
+    return {
+      ...base,
+      ...output,
+      reading: false,
+      text: String(output?.text || "").slice(0, AI_FILE_TEXT_PER_FILE_LIMIT)
+    };
+  } catch (error) {
+    return {
+      ...base,
+      reading: false,
+      error: shortErrorMessage(error),
+      note: shortErrorMessage(error)
+    };
+  }
+}
+
+async function addAiImages(files = []) {
+  const imageFiles = Array.from(files || []).filter((file) => file?.type?.startsWith("image/"));
+  const remaining = Math.max(0, AI_REFERENCE_IMAGE_LIMIT - state.ai.images.length);
+  const accepted = imageFiles.slice(0, remaining);
+  if (accepted.length < imageFiles.length) {
+    toast(`顶级模型对话/生图最多保留 ${AI_REFERENCE_IMAGE_LIMIT} 张参考图。`, "error");
+  }
+  for (const file of accepted) {
+    state.ai.images.push({
+      name: file.name,
+      dataUrl: await fileToDataUrl(file)
+    });
+  }
+  renderAiThumbs();
+  if (accepted.length) {
+    if (els.aiStatusLine) els.aiStatusLine.textContent = `已添加 ${accepted.length} 张参考图`;
+    toast(`已添加 ${accepted.length} 张参考图`);
+  }
+}
+
+async function addAiDocuments(files = []) {
+  const source = Array.from(files || []).filter((file) => file && !file.type?.startsWith("image/"));
+  if (!source.length) return;
+  const remaining = Math.max(0, AI_FILE_LIMIT - (state.ai.files || []).length);
+  const accepted = source.slice(0, remaining).filter((file) => {
+    if (file.size > AI_FILE_MAX_SIZE) {
+      toast(`${file.name} 超过 ${formatFileSize(AI_FILE_MAX_SIZE)}，已跳过。`, "error");
+      return false;
+    }
+    return true;
+  });
+  if (accepted.length < source.length) {
+    toast(`顶级模型对话/生图最多保留 ${AI_FILE_LIMIT} 个文件。`, "error");
+  }
+  if (!accepted.length) return;
+  const placeholders = accepted.map((file) => ({
+    id: createAiAttachmentId(),
+    name: file.name || "未命名文件",
+    type: file.type || "",
+    size: file.size || 0,
+    reading: true
+  }));
+  state.ai.files.push(...placeholders);
+  renderAiFileChips();
+  if (els.aiStatusLine) els.aiStatusLine.textContent = "正在读取文件";
+  const parsed = await Promise.all(accepted.map(async (file, index) => ({
+    ...(await readAiDocument(file)),
+    id: placeholders[index].id
+  })));
+  for (const file of parsed) {
+    const targetIndex = state.ai.files.findIndex((item) => item.id === file.id);
+    if (targetIndex >= 0) state.ai.files.splice(targetIndex, 1, file);
+  }
+  renderAiFileChips();
+  const readableCount = parsed.filter((file) => file.readable).length;
+  const infoOnlyCount = parsed.length - readableCount;
+  if (els.aiStatusLine) {
+    els.aiStatusLine.textContent = readableCount
+      ? `已读取 ${readableCount} 个文件${infoOnlyCount ? `，${infoOnlyCount} 个仅附带文件信息` : ""}`
+      : "文件已添加，但没有可读文本内容";
+  }
+  toast(readableCount ? `已读取 ${readableCount} 个文件` : "文件已添加，未提取到可读文本");
+}
+
+async function addAiAttachments(files = []) {
+  const allFiles = Array.from(files || []);
+  await addAiImages(allFiles);
+  await addAiDocuments(allFiles);
+}
+
+async function handleAiPaste(event) {
+  if (state.route !== "ai") return;
+  const items = Array.from(event.clipboardData?.items || []);
+  const files = items
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  await addAiAttachments(files);
+  els.aiMessageInput?.focus();
+}
+
+function buildAiFileContext() {
+  const files = (state.ai.files || []).filter((file) => !file.reading);
+  if (!files.length) return "";
+  let used = 0;
+  const sections = [];
+  for (const file of files) {
+    const meta = [
+      `文件名：${file.name || "未命名文件"}`,
+      `类型：${file.type || "未知"}`,
+      `大小：${formatFileSize(file.size)}`
+    ].join("；");
+    const text = String(file.text || "").trim();
+    const note = String(file.note || file.error || "").trim();
+    const remaining = Math.max(0, AI_FILE_CONTEXT_LIMIT - used);
+    if (!remaining) break;
+    if (text) {
+      const clipped = text.slice(0, Math.min(AI_FILE_TEXT_PER_FILE_LIMIT, remaining));
+      used += clipped.length;
+      sections.push(`【可读文件】${meta}\n内容：\n${clipped}${text.length > clipped.length ? "\n（内容过长，已截断）" : ""}`);
+    } else {
+      sections.push(`【文件信息】${meta}\n说明：${note || "没有可发送给模型的文本内容；请基于文件名和用户问题谨慎回答，不要假装已经读取文件正文。"}`);
+    }
+  }
+  if (!sections.length) return "";
+  return [
+    "以下是用户上传给顶级模型对话/生图的附件资料。请优先基于可读文件内容回答；如果某个文件只有文件信息，请明确说明无法读取正文，不要编造文件内容。",
+    sections.join("\n\n")
+  ].join("\n\n");
+}
+
+function buildAiConversationContext() {
+  const history = (state.ai.messages || [])
+    .filter((item) => item.role === "user" || item.role === "assistant")
+    .slice(-8)
+    .map((item) => `${item.role === "user" ? "用户" : (item.modelName || "模型")}：${String(item.text || "").replace(/\s+/g, " ").slice(0, 900)}`)
+    .filter((line) => !/：$/.test(line));
+  return history.length ? `最近对话上下文：\n${history.join("\n")}` : "";
+}
+
+function aiAssistantModelName(mode = state.ai.mode || "chat", promptConfig = null) {
+  if (mode === "image") return resolveAiImageModel() || "生图模型";
+  const config = promptConfig || promptConfigForScope("ai");
+  return config.promptModel || promptProviderLabel(config.promptProvider || "custom") || "模型";
+}
+
+function renderAiMessages() {
+  if (!els.aiMessages) return;
+  if (!state.ai.messages.length) {
+    els.aiMessages.innerHTML = "";
+    els.aiMessages.classList.add("ai-messages-empty");
+    return;
+  }
+  els.aiMessages.classList.remove("ai-messages-empty");
+  els.aiMessages.innerHTML = "";
+  for (const message of state.ai.messages) {
+    const item = document.createElement("article");
+    item.className = `ai-message ai-message-${message.role}${message.pending ? " ai-message-pending" : ""}`;
+    const images = (message.images || [])
+      .map((url) => `<img src="${escapeHtml(url)}" alt="AI生成图">`)
+      .join("");
+    const fileChips = (message.files || [])
+      .map((file) => `<span class="ai-message-file">${escapeHtml(file.name || "文件")}<small>${escapeHtml(file.readable ? "已读取" : "文件信息")}</small></span>`)
+      .join("");
+    const label = message.role === "assistant" ? (message.modelName || "模型") : "";
+    item.innerHTML = `
+      ${label ? `<strong>${escapeHtml(label)}</strong>` : ""}
+      ${message.pending ? `<div class="ai-typing" aria-label="等待回复"><span></span><span></span><span></span></div>` : ""}
+      ${!message.pending && message.text ? `<p>${escapeHtml(message.text)}</p>` : ""}
+      ${fileChips ? `<div class="ai-message-files">${fileChips}</div>` : ""}
+      ${images ? `<div class="ai-message-images">${images}</div>` : ""}
+    `;
+    item.querySelectorAll("img").forEach((img) => {
+      img.addEventListener("click", () => openImageViewer(img.src, "顶级模型结果"));
+    });
+    els.aiMessages.appendChild(item);
+  }
+  els.aiMessages.scrollTop = els.aiMessages.scrollHeight;
+}
+
+function setAiMode(mode = "chat") {
+  state.ai.mode = mode === "image" ? "image" : "chat";
+  els.aiModeGroup?.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.value === state.ai.mode);
+  });
+  if (els.aiSendBtn) els.aiSendBtn.textContent = state.ai.mode === "image" ? "生成图片" : "发送";
+}
+
+async function sendAiWorkspaceMessage() {
+  const message = els.aiMessageInput?.value.trim() || "";
+  const pendingFiles = (state.ai.files || []).filter((file) => file.reading);
+  if (pendingFiles.length) {
+    toast("文件还在读取中，请稍等。", "error");
+    return;
+  }
+  if (!message && !state.ai.images.length && !state.ai.files.length) {
+    toast("请输入内容，或上传图片/文件。", "error");
+    return;
+  }
+  const mode = state.ai.mode || "chat";
+  if (mode === "image" && !message) {
+    toast("生成图片模式需要输入明确的作图或修改要求。", "error");
+    return;
+  }
+  if (mode === "image" && !message && state.ai.files.length && !state.ai.images.length) {
+    toast("生成图片模式需要输入作图要求，文件分析请切换到对话模式。", "error");
+    return;
+  }
+  const fileContext = buildAiFileContext();
+  const conversationContext = mode === "chat" ? buildAiConversationContext() : "";
+  const modelMessage = [conversationContext, fileContext, message].filter(Boolean).join("\n\n");
+  const promptConfig = mode === "chat" ? promptConfigForScope("ai") : null;
+  const modelName = aiAssistantModelName(mode, promptConfig);
+  const pendingId = createAiAttachmentId();
+  state.ai.messages.push({
+    role: "user",
+    text: message || (mode === "image" ? "按参考图生成/修改图片" : (state.ai.files.length ? "请分析上传文件" : "请分析参考图")),
+    images: state.ai.images.map((image) => image.dataUrl),
+    files: state.ai.files.map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      readable: file.readable
+    }))
+  });
+  state.ai.messages.push({
+    id: pendingId,
+    role: "assistant",
+    modelName,
+    pending: true
+  });
+  if (els.aiMessageInput) els.aiMessageInput.value = "";
+  renderAiMessages();
+  if (els.aiStatusLine) els.aiStatusLine.textContent = mode === "image" ? "正在生成图片" : "正在调用 AI";
+  if (els.aiSendBtn) els.aiSendBtn.disabled = true;
+  try {
+    const images = await compactPromptImages(state.ai.images.map((image) => image.dataUrl), 6, 1600);
+    if (mode === "image") {
+      const output = await window.studio.aiGenerateImage({
+        prompt: [fileContext, message].filter(Boolean).join("\n\n"),
+        images,
+        resolution: state.resolution,
+        ratio: state.ratio,
+        imageModelRoute: resolveAiImageModel()
+      });
+      const urls = (output.results || []).map((item) => item.url).filter(Boolean);
+      const pending = state.ai.messages.find((item) => item.id === pendingId);
+      if (pending) {
+        pending.pending = false;
+        pending.text = urls.length ? "图片已生成。" : "作图接口没有返回图片。";
+        pending.images = urls;
+      }
+      if (els.aiStatusLine) els.aiStatusLine.textContent = urls.length ? "图片生成完成" : "图片生成失败";
+    } else {
+      if (!ensureVisionModelForImages("顶级模型对话", images, promptConfig)) {
+        state.ai.messages = state.ai.messages.filter((item) => item.id !== pendingId);
+        return;
+      }
+      const output = await window.studio.aiChat({
+        message: modelMessage,
+        images,
+        promptConfig,
+        requireVisionPromptModel: images.length > 0
+      });
+      const pending = state.ai.messages.find((item) => item.id === pendingId);
+      if (pending) {
+        pending.pending = false;
+        pending.text = output.text || "模型没有返回文字。";
+      }
+      if (els.aiStatusLine) els.aiStatusLine.textContent = "AI 已回复";
+    }
+  } catch (error) {
+    const pending = state.ai.messages.find((item) => item.id === pendingId);
+    if (pending) {
+      pending.pending = false;
+      pending.text = `调用失败：${shortErrorMessage(error)}`;
+    }
+    if (els.aiStatusLine) els.aiStatusLine.textContent = "调用失败";
+    showFailureModal(error, mode === "image" ? "顶级模型生图失败" : "顶级模型对话失败", sendAiWorkspaceMessage);
+  } finally {
+    if (els.aiSendBtn) els.aiSendBtn.disabled = false;
+    renderAiMessages();
+  }
+}
+
+function clearAiWorkspace() {
+  state.ai.images = [];
+  state.ai.files = [];
+  state.ai.messages = [];
+  if (els.aiMessageInput) els.aiMessageInput.value = "";
+  renderAiThumbs();
+  renderAiFileChips();
+  renderAiMessages();
+  if (els.aiStatusLine) els.aiStatusLine.textContent = "新对话已准备好";
+}
+
+function fillAiWorkspacePrompt(type = "") {
+  if (!els.aiMessageInput) return;
+  const presets = {
+    analyze: {
+      mode: "chat",
+      text: "请分析我上传的产品图中是否存在变形、结构错误、材质失真、使用方式错误，并指出需要修改的位置。"
+    },
+    edit: {
+      mode: "chat",
+      text: "请把我上传的图片问题整理成一条简短、精准、适合作图模型执行的修图指令，只修改问题区域，保持产品结构、材质、数量和主体身份不变。"
+    },
+    usage: {
+      mode: "chat",
+      text: "请检查图片里的产品使用方式、接触关系、使用后状态是否正确，尤其不要把产品做坏、做断或改变真实功能。"
+    },
+    prompt: {
+      mode: "chat",
+      text: "请优化下面的作图提示词，让它更短、更准确，重点解决产品使用方式错误、展示状态错误、产品被做坏或做断的问题。"
+    },
+    ecommerce: {
+      mode: "image",
+      text: [
+        "请根据我上传的产品参考图生成一张专业电商产品图片。",
+        "要求：保持产品真实结构、颜色、材质、数量、比例和可见细节完全一致，不要重新设计产品，不要增加不存在的配件。",
+        "画面：干净高级的商业摄影风格，产品为主体，构图清晰，有自然光影和真实材质质感，背景和道具只做衬托，不遮挡产品关键结构。",
+        "用途：适合作为跨境电商详情页/商品展示图，画面看起来真实、清爽、可直接用于销售页面。",
+        "禁止：文字水印、中文文字、虚假品牌、夸张特效、产品变形、错误使用方式、产品被切断或融合到其它物体。"
+      ].join("\n")
+    },
+    image: {
+      mode: "image",
+      text: "请根据我上传的参考图生成或修改图片，只调整我描述的问题，保持产品结构、材质、数量和主体身份不变。"
+    }
+  };
+  const preset = presets[type] || presets.analyze;
+  setAiMode(preset.mode);
+  els.aiMessageInput.value = preset.text;
+  els.aiMessageInput.focus();
+}
+
+function syncAplusModuleCard(input) {
+  const card = input?.closest(".aplus-module-card");
+  if (card) card.classList.toggle("selected", Boolean(input.checked));
+}
+
+function syncAplusSelectAllButton() {
+  const inputs = $$("[data-aplus-module]");
+  const allSelected = inputs.length > 0 && inputs.every((input) => input.checked);
+  if (els.aplusSelectAllModulesBtn) els.aplusSelectAllModulesBtn.textContent = allSelected ? "取消全选" : "全选";
+}
+
+function syncAplusModuleUi() {
+  $$("[data-aplus-module]").forEach(syncAplusModuleCard);
+  syncAplusSelectAllButton();
+}
+
+async function handleAplusProductImageDrop(event) {
+  event.preventDefault();
+  els.aplusDropzone?.classList.remove("dragging");
+  await addFiles(extractImageFilesFromDataTransfer(event.dataTransfer), "aplus");
+}
+
 function hasProductInfoInput() {
-  return Boolean((els.productName?.value || "").trim() || (els.productInfo?.value || "").trim());
+  const packageInputs = buildPackageInputs();
+  return Boolean(
+    (els.productName?.value || "").trim()
+    || (els.productInfo?.value || "").trim()
+    || Object.values(packageInputs).some((value) => String(value || "").trim())
+  );
 }
 
 function chineseDisplayText(value) {
@@ -1542,21 +3358,19 @@ function chineseDisplayList(values) {
 }
 
 function composeEditableProductDescription(analysis = {}) {
-  const sellingPoints = chineseDisplayList(analysis.selling_points_zh);
-  const detailFocus = chineseDisplayList(analysis.detail_focus_areas_zh);
-  const risks = chineseDisplayList(analysis.misjudgment_risks_zh);
   const partFunctions = chineseDisplayList(analysis.part_function_map_zh);
-  const forbiddenErrors = chineseDisplayList(analysis.forbidden_use_errors_zh);
+  const details = chineseDisplayList(analysis.detail_focus_areas_zh);
   const regional = analysis.regional_use_context || {};
+  const factLines = [];
+  if (chineseDisplayText(analysis.product_summary_zh)) factLines.push(`产品：${chineseDisplayText(analysis.product_summary_zh).slice(0, 140)}`);
+  if (chineseDisplayText(analysis.unit_of_sale)) factLines.push(`购买单位：${chineseDisplayText(analysis.unit_of_sale).slice(0, 80)}`);
+  if (details.length) factLines.push(`外观/材质：${details.slice(0, 5).join("；")}`);
+  if (partFunctions.length) factLines.push(`结构功能：${partFunctions.slice(0, 5).join("；")}`);
+  if (chineseDisplayText(regional.real_use_summary_zh)) factLines.push(`用途：${chineseDisplayText(regional.real_use_summary_zh).slice(0, 100)}`);
+  if (chineseDisplayText(analysis.correct_use_method_zh)) factLines.push(`正确用法：${chineseDisplayText(analysis.correct_use_method_zh).slice(0, 120)}`);
   const lines = [
-    chineseDisplayText(analysis.product_summary_zh) ? `AI识别摘要：${chineseDisplayText(analysis.product_summary_zh)}` : "",
-    chineseDisplayText(regional.real_use_summary_zh) ? `真实用途：${chineseDisplayText(regional.real_use_summary_zh)}` : "",
-    chineseDisplayText(analysis.correct_use_method_zh) ? `正确使用方式：${chineseDisplayText(analysis.correct_use_method_zh)}` : "",
-    sellingPoints.length ? `核心卖点：${sellingPoints.join("；")}` : "",
-    partFunctions.length ? `部件功能：${partFunctions.join("；")}` : "",
-    detailFocus.length ? `需要保留的细节：${detailFocus.join("；")}` : "",
-    risks.length ? `容易误判的地方：${risks.join("；")}` : "",
-    forbiddenErrors.length ? `禁止错误用法：${forbiddenErrors.join("；")}` : ""
+    ...factLines.slice(0, 6),
+    "提示：这里只核对商品事实和正确使用方式，不要写完整作图提示词。"
   ].filter(Boolean);
   return lines.join("\n");
 }
@@ -1567,21 +3381,19 @@ function shouldReplaceProductDescription() {
 }
 
 function syncEditableProductDescriptionFromAnalysis(analysis = {}) {
-  const description = composeEditableProductDescription(analysis);
-  if (!description || !els.productInfo || !shouldReplaceProductDescription()) return false;
-  els.productInfo.value = description.slice(0, Number(els.productInfo.maxLength || 2500));
-  state.autoFilledProductInfo = els.productInfo.value.trim();
-  state.productFactsReviewPending = true;
-  updateProductInfoCharCount();
-  if (els.productModeTips) {
-    els.productModeTips.textContent = "AI 已补全产品描述。请先复核左侧信息；如有不准确，直接修改后再次点击 AI 自动分析。";
+  state.autoFilledProductInfo = composeEditableProductDescription(analysis);
+  if (els.productInfo && shouldReplaceProductDescription()) {
+    els.productInfo.value = state.autoFilledProductInfo;
+    updateProductInfoCharCount();
   }
-  return true;
+  state.productFactsReviewPending = false;
+  return Boolean(state.autoFilledProductInfo);
 }
 
 function updateProductInfoCharCount() {
-  const total = (els.productName?.value.length || 0) + (els.productInfo?.value.length || 0);
-  if (els.charCount) els.charCount.textContent = `${total}/2700`;
+  const nameTotal = els.productName?.value.length || 0;
+  const infoTotal = els.productInfo?.value.length || 0;
+  if (els.charCount) els.charCount.textContent = `${nameTotal}/200 · ${infoTotal}/1800`;
 }
 
 function syncProductModeUi() {
@@ -1594,34 +3406,41 @@ function syncProductModeUi() {
   if (els.productInfo) els.productInfo.placeholder = copy.infoPlaceholder;
   if (els.packageModeHint) els.packageModeHint.textContent = copy.hint;
   if (els.productModeTips) els.productModeTips.textContent = copy.tips;
+  els.bundleFields?.classList.toggle("hidden", state.productPackageMode !== "bundle");
+  els.multipackFields?.classList.toggle("hidden", state.productPackageMode !== "multipack");
   updateProductInfoCharCount();
 }
 
 function markProductFactsEdited() {
-  if (state.lastAnalyzedProductFacts && currentProductFactsSignature() !== state.lastAnalyzedProductFacts) {
-    state.productFactsReviewPending = true;
-    els.promptBox.value = "";
+  state.productFactsReviewPending = false;
+  const changed = !state.lastAnalyzedProductFacts || currentProductFactsSignature() !== state.lastAnalyzedProductFacts;
+  if (changed) {
+    state.analysis = null;
+    state.lastAnalyzedProductFacts = "";
+    state.suitePlan = null;
+    state.promptPlan = [];
+    if (els.promptBox) els.promptBox.value = "";
     renderSuitePlan(null);
     renderPromptPlan([]);
-    if (els.productModeTips) {
-      els.productModeTips.textContent = "您已修改产品事实信息。为了避免旧提示词继续出图，请重新点击 AI 自动分析。";
-    }
-    if (els.statusLine) {
-      els.statusLine.textContent = "产品描述已修改，请先重新 AI 自动分析";
-    }
+    if (els.summaryBox) els.summaryBox.value = "";
+    if (els.sellingPointsBox) els.sellingPointsBox.value = "";
+    if (els.statusLine) els.statusLine.textContent = "商品信息已更新，生成时会直接使用当前填写内容";
   }
 }
 
 function buildPayload() {
   return {
+    featureScope: "image",
     productInfo: buildProductInfoText(),
     productPackageMode: state.productPackageMode,
+    packageInputs: buildPackageInputs(),
     images: state.images.slice(0, 6).map((image) => image.dataUrl),
     brand: { ...state.brand },
     resolution: state.resolution,
     ratio: state.ratio,
     imageModelRoute: resolveCurrentImageModel(),
     referenceStrategy: state.referenceStrategy,
+    suiteMode: state.suiteMode,
     imageKinds: getImageKindPlans(),
     aPlusSize: state.aPlusSize
   };
@@ -1853,7 +3672,7 @@ function buildTitleProductInfo() {
 }
 
 function setRoute(route) {
-  const nextRoute = route === "title" || route === "video" ? route : "image";
+  const nextRoute = ["image", "ai", "aplus", "title", "video"].includes(route) ? route : "image";
   state.route = nextRoute;
   localStorage.setItem(ACTIVE_ROUTE_STORAGE_KEY, nextRoute);
 
@@ -1861,12 +3680,22 @@ function setRoute(route) {
     button.classList.toggle("active", button.dataset.route === nextRoute);
   });
   els.imagePage.classList.toggle("hidden", nextRoute !== "image");
+  els.aiPage?.classList.toggle("hidden", nextRoute !== "ai");
+  els.aplusPage?.classList.toggle("hidden", nextRoute !== "aplus");
   els.titlePage.classList.toggle("hidden", nextRoute !== "title");
   els.videoPage.classList.toggle("hidden", nextRoute !== "video");
 
   if (nextRoute === "title") {
     syncTitleInputsFromImage();
+  } else if (nextRoute === "aplus") {
+    syncAplusInputsFromImage();
   }
+}
+
+function syncAplusInputsFromImage() {
+  if (els.aplusProductName) els.aplusProductName.value = state.aplus.productName || els.aplusProductName.value || "";
+  if (els.aplusProductInfo) els.aplusProductInfo.value = state.aplus.productInfo || els.aplusProductInfo.value || "";
+  renderAplusThumbs();
 }
 
 function buildTitlePayload() {
@@ -2140,6 +3969,7 @@ function translateTitleError(error) {
 
 function setProgress(value, text) {
   const safe = Math.max(0, Math.min(100, Number(value || 0)));
+  cancelProgressHideTimer();
   els.progressBox.classList.remove("hidden");
   els.progressBox.classList.remove("progress-failed", "progress-success");
   els.progressBox.classList.toggle("ai-thinking", safe < 100);
@@ -2148,15 +3978,254 @@ function setProgress(value, text) {
   if (text) els.progressText.textContent = text;
 }
 
+function activeResultsContainer(scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  if (key === "aplus") return els.aplusResults || els.results;
+  return els.results;
+}
+
+function activeProgressScope(scope = generationResultScope()) {
+  return normalizeResultScope(scope);
+}
+
+function scopedStatusLine(scope = activeProgressScope()) {
+  if (scope === "aplus") return els.aplusStatusLine || els.statusLine;
+  return els.statusLine;
+}
+
+function setActiveGenerationProgress(value, text, status = "active", scope = generationResultScope()) {
+  scope = activeProgressScope(scope);
+  if (scope === "image") {
+    if (status === "failed") setProgressFailed(text);
+    else if (status === "success") setProgressSuccess(text);
+    else setProgress(value, text);
+    return;
+  }
+  setScopedProgress(scope, value, text, status);
+}
+
+function setScopedProgress(scope, value, text, status = "active") {
+  const map = scope === "aplus"
+    ? {
+      box: els.aplusProgressBox,
+      text: els.aplusProgressText,
+      number: els.aplusProgressNumber,
+      fill: els.aplusProgressFill
+    }
+    : {
+        box: els.progressBox,
+        text: els.progressText,
+        number: els.progressNumber,
+        fill: els.progressFill
+      };
+  if (!map.box || !map.fill || !map.number || !map.text) return;
+  const safe = Math.max(0, Math.min(100, Number(value || 0)));
+  map.box.classList.remove("hidden", "progress-failed", "progress-success");
+  if (status === "failed") {
+    map.box.classList.add("progress-failed");
+    map.fill.style.width = "100%";
+    map.number.textContent = "失败";
+  } else if (status === "success") {
+    map.box.classList.add("progress-success");
+    map.fill.style.width = "100%";
+    map.number.textContent = "100%";
+  } else {
+    map.box.classList.toggle("ai-thinking", safe < 100);
+    map.fill.style.width = `${safe}%`;
+    map.number.textContent = `${Math.round(safe)}%`;
+  }
+  map.text.textContent = text || "生成中";
+}
+
+function setInlineAiStatus(scope = "image", text = "", status = "active") {
+  const key = normalizeResultScope(scope);
+  const target = key === "aplus" ? els.aplusAiInlineStatus : els.imageAiInlineStatus;
+  if (!target) return;
+  target.textContent = text || "";
+  target.classList.toggle("hidden", !text);
+  target.classList.remove("active", "success", "failed");
+  if (text) target.classList.add(status === "failed" ? "failed" : status === "success" ? "success" : "active");
+}
+
+function workflowStepDefinitions() {
+  return [
+    { id: "analysis", label: "AI识别产品" },
+    { id: "planning", label: "提交与规划任务" },
+    { id: "prompts", label: "生成分类提示词" },
+    { id: "submit", label: "提交作图任务" },
+    { id: "render", label: "等待生图返回" },
+    { id: "done", label: "展示结果" }
+  ];
+}
+
+function workflowIndex(stepId) {
+  return workflowStepDefinitions().findIndex((step) => step.id === stepId);
+}
+
+function resetWorkflowSteps(mode = "generate") {
+  const disabled = mode === "analyze" ? new Set(["planning", "prompts", "submit", "render", "done"]) : new Set();
+  state.workflowSteps = workflowStepDefinitions().map((step) => ({
+    ...step,
+    status: disabled.has(step.id) ? "disabled" : "pending",
+    detail: ""
+  }));
+  renderWorkflowSteps();
+}
+
+function setWorkflowStep(stepId, status = "active", detail = "") {
+  if (!els.workflowSteps) return;
+  if (!state.workflowSteps?.length) resetWorkflowSteps("generate");
+  const targetIndex = workflowIndex(stepId);
+  state.workflowSteps = state.workflowSteps.map((step, index) => {
+    if (step.status === "disabled") return step;
+    if (index < targetIndex && ["pending", "active"].includes(step.status)) {
+      return { ...step, status: "done", detail: step.detail || "" };
+    }
+    if (step.id === stepId) return { ...step, status, detail };
+    return step;
+  });
+  renderWorkflowSteps();
+}
+
+function failWorkflowStep(stepId, detail = "") {
+  setWorkflowStep(stepId, "failed", detail);
+}
+
+function completeWorkflow(detail = "") {
+  state.workflowSteps = workflowStepDefinitions().map((step) => ({
+    ...step,
+    status: "done",
+    detail: step.id === "done" ? detail : ""
+  }));
+  renderWorkflowSteps();
+}
+
+function renderWorkflowSteps() {
+  if (!els.workflowSteps) return;
+  const steps = state.workflowSteps?.length ? state.workflowSteps : workflowStepDefinitions().map((step) => ({
+    ...step,
+    status: "pending",
+    detail: ""
+  }));
+  els.workflowSteps.classList.remove("hidden");
+  els.workflowSteps.innerHTML = steps.map((step) => `
+    <div class="workflow-step ${step.status}">
+      <span class="workflow-dot"></span>
+      <span class="workflow-label">${escapeHtml(step.label)}</span>
+      ${step.detail ? `<small>${escapeHtml(step.detail)}</small>` : ""}
+    </div>
+  `).join("");
+}
+
+function cancelProgressHideTimer() {
+  if (!progressHideTimer) return;
+  window.clearTimeout(progressHideTimer);
+  progressHideTimer = null;
+}
+
+function hideProgressLater(delay = 900) {
+  cancelProgressHideTimer();
+  progressHideTimer = window.setTimeout(() => {
+    progressHideTimer = null;
+    if (state.activeGenerationId) return;
+    els.progressBox.classList.add("hidden");
+  }, delay);
+}
+
+function markGenerationHeartbeat() {
+  state.lastGenerationProgressAt = Date.now();
+}
+
+function stopGenerationWatchdog() {
+  if (!generationWatchdogTimer) return;
+  window.clearInterval(generationWatchdogTimer);
+  generationWatchdogTimer = null;
+}
+
+function startGenerationWatchdog(generationId, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  stopGenerationWatchdog();
+  state.activeGenerationStartedAt = Date.now();
+  state.lastGenerationProgressAt = state.activeGenerationStartedAt;
+  generationWatchdogTimer = window.setInterval(() => {
+    if (state.activeGenerationId !== generationId) {
+      stopGenerationWatchdog();
+      return;
+    }
+    const now = Date.now();
+    const startedAt = state.activeGenerationStartedAt || now;
+    const lastProgressAt = state.lastGenerationProgressAt || startedAt;
+    const silentSeconds = Math.floor((now - lastProgressAt) / 1000);
+    const totalSeconds = Math.floor((now - startedAt) / 1000);
+    if (silentSeconds < 12) return;
+
+    const active = state.workflowSteps?.find((step) => step.status === "active");
+    const stepLabel = active?.label || "后台任务";
+    const detail = !state.generationProgressReceived
+      ? `正在提交后台任务，已等待 ${silentSeconds} 秒；若超过 15 秒会自动失败并显示真实原因`
+      : silentSeconds >= 45
+      ? `等待当前步骤返回 ${silentSeconds} 秒，后台会继续按超时规则处理`
+      : `等待后台响应 ${silentSeconds} 秒`;
+    if (key !== "image") {
+      setActiveGenerationProgress(8, `${stepLabel}仍在执行，已等待 ${totalSeconds} 秒；${detail}`, "active", key);
+      return;
+    }
+    if (active?.id) {
+      setWorkflowStep(active.id, "active", detail);
+    }
+    setProgress(
+      Number(els.progressNumber?.textContent?.replace("%", "")) || 2,
+      `${stepLabel}仍在执行，已等待 ${totalSeconds} 秒；${detail}`
+    );
+  }, 3000);
+}
+
+function weightedGenerationProgress(progress = {}, scope = generationResultScope()) {
+  const stage = progress.stage || "";
+  const current = Math.max(0, Number(progress.current || 0));
+  const total = Math.max(1, Number(progress.total || scopedLiveTotalCount(scope) || 1));
+  if (stage === "accepted" || stage === "loading-config") return 2;
+  if (stage === "validating" || stage === "planning-items") return 3;
+  if (stage === "rewriting-prompts") return Math.min(25, 8 + (current / total) * 17);
+  if (stage === "submitting") return 35;
+  if (stage === "completed") return 90;
+  return Number(progress.progress || 8);
+}
+
+function waitForGenerationFinish(generationId, timeoutMs = 30 * 60 * 1000) {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      delete state.generationFinishResolvers[generationId];
+      reject(new Error("生成任务超过 30 分钟仍未结束，请检查提示词模型、作图模型或网络连接。"));
+    }, timeoutMs);
+    state.generationFinishResolvers[generationId] = {
+      resolve: (value) => {
+        window.clearTimeout(timer);
+        delete state.generationFinishResolvers[generationId];
+        resolve(value);
+      },
+      reject: (error) => {
+        window.clearTimeout(timer);
+        delete state.generationFinishResolvers[generationId];
+        reject(error);
+      }
+    };
+  });
+}
+
 function setProgressFailed(text = "任务失败") {
+  cancelProgressHideTimer();
   els.progressBox.classList.remove("hidden", "ai-thinking", "progress-success");
   els.progressBox.classList.add("progress-failed");
   els.progressFill.style.width = "100%";
   els.progressNumber.textContent = "失败";
   els.progressText.textContent = text;
+  const active = state.workflowSteps?.find((step) => step.status === "active");
+  if (active) failWorkflowStep(active.id, text);
 }
 
 function setProgressSuccess(text = "任务完成") {
+  cancelProgressHideTimer();
   els.progressBox.classList.remove("hidden", "ai-thinking", "progress-failed");
   els.progressBox.classList.add("progress-success");
   els.progressFill.style.width = "100%";
@@ -2188,17 +4257,19 @@ function showAnalysis(analysis) {
     chineseDisplayText(regionalUse.assumptions_zh) ? `\n用途假设：${chineseDisplayText(regionalUse.assumptions_zh)}` : ""
   ].filter(Boolean);
   els.summaryBox.value = summaryParts.join("\n");
-  els.sellingPointsBox.value = chineseDisplayList(analysis.selling_points_zh).join("\n");
+  els.sellingPointsBox.value = [
+    ...chineseDisplayList(analysis.detail_focus_areas_zh).map((item) => `外观/材质：${item}`),
+    ...chineseDisplayList(analysis.part_function_map_zh).map((item) => `结构功能：${item}`),
+    chineseDisplayText(analysis.correct_use_method_zh) ? `正确用法：${chineseDisplayText(analysis.correct_use_method_zh)}` : ""
+  ].filter(Boolean).join("\n");
   els.promptBox.value = analysis.final_prompt_en || "";
 
   const warning = Array.isArray(analysis.warnings) && analysis.warnings.length ? `；${analysis.warnings[0]}` : "";
   els.statusLine.textContent = `产品已自动识别，提示词已生成${warning}`;
-  const filledEditableBrief = syncEditableProductDescriptionFromAnalysis(analysis);
+  syncEditableProductDescriptionFromAnalysis(analysis);
   state.lastAnalyzedProductFacts = currentProductFactsSignature();
   state.productFactsReviewPending = false;
-  els.statusLine.textContent = filledEditableBrief
-    ? "AI 已补全左侧产品描述，请复核后再生成；如修改过，请再次点击 AI 自动分析"
-    : "产品已按左侧确认信息重新分析，提示词已生成";
+  els.statusLine.textContent = "产品已自动识别，套图生成会继续自动完成";
 }
 
 async function analyze() {
@@ -2207,28 +4278,83 @@ async function analyze() {
     toast("请上传商品图或填写商品信息。", "error");
     return false;
   }
-  payload.promptConfig = {
-    promptProvider: state.config?.promptProvider || "custom",
-    promptBaseUrl: state.config?.promptBaseUrl || "",
-    promptApiKey: state.config?.promptApiKey || "",
-    promptModel: state.config?.promptModel || "",
-    promptEndpoint: state.config?.promptEndpoint || "chat",
-    promptProviderApiOptions: state.config?.promptProviderApiOptions || {},
-    promptModelCapabilities: state.config?.promptModelCapabilities || {}
-  };
+  if (!payload.images.length) {
+    showMessageModal("AI帮写必须上传产品图，不能只用纯文本调用。", "缺少产品图", "error");
+    return false;
+  }
+  payload.promptConfig = promptConfigForScope("image");
+  if (!ensureVisionModelForImages("图片制作 AI帮写", payload.images, payload.promptConfig)) {
+    return false;
+  }
+  payload.images = await compactPromptImages(payload.images, 4, 1024);
+  payload.requireVisionPromptModel = payload.images.length > 0;
 
   setBusy(true, "正在自动识别产品并生成提示词");
-  setProgress(12, "AI 自动识别产品中");
+  setInlineAiStatus("image", "AI正在读取产品图", "active");
+  resetWorkflowSteps("analyze");
+  setWorkflowStep("analysis", "active", "正在调用提示词/识图模型");
+  setProgress(12, "AI分析产品中");
   try {
     const analysis = await window.studio.analyzePrompt(payload);
     showAnalysis(analysis);
+    setInlineAiStatus("image", "AI帮写完成", "success");
+    setWorkflowStep("analysis", "done", "识别完成");
     setProgressSuccess("识别完成");
-    setTimeout(() => els.progressBox.classList.add("hidden"), 700);
+    hideProgressLater(700);
     return true;
   } catch (error) {
-    setProgressFailed(`AI 识别失败：${shortErrorMessage(error)}`);
-    showPromptFailureModal(error, "AI 自动识别产品失败", analyze);
-    els.statusLine.textContent = "AI 自动识别产品失败";
+    failWorkflowStep("analysis", shortErrorMessage(error));
+    setInlineAiStatus("image", `AI帮写失败：${shortErrorMessage(error)}`, "failed");
+    setProgressFailed(`自动识别失败：${shortErrorMessage(error)}`);
+    showPromptFailureModal(error, "后台自动识别产品失败", analyze, "image");
+    els.statusLine.textContent = "后台自动识别产品失败";
+    return false;
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function analyzeAplusProduct() {
+  const payload = buildAplusPayload();
+  if (!payload.productInfo.trim() && payload.images.length === 0) {
+    toast("请先上传 A+ 商品图或填写 A+ 商品信息。", "error");
+    return false;
+  }
+  if (!payload.images.length) {
+    showMessageModal("A+ AI帮写必须上传产品图，不能只用纯文本帮写。", "缺少产品图", "error");
+    return false;
+  }
+  const promptConfig = promptConfigForScope("aplus");
+  if (!ensureVisionModelForImages("A+ AI帮写", "aplus", promptConfig)) {
+    return false;
+  }
+  payload.analysisMode = "aplus-write";
+  payload.images = await compactPromptImages(payload.images, 4, 1024);
+  payload.promptConfig = promptConfig;
+  payload.requireVisionPromptModel = true;
+
+  setBusy(true, "正在为 A+ 详情页分析商品");
+  setInlineAiStatus("aplus", "AI正在读取A+产品图", "active");
+  setScopedProgress("aplus", 12, "A+ AI帮写中");
+  if (els.aplusStatusLine) els.aplusStatusLine.textContent = "A+ AI帮写中";
+  try {
+    const analysis = await window.studio.analyzePrompt(payload);
+    setAnalysisForScope("aplus", analysis);
+    const nextInfo = composeEditableProductDescription(analysis);
+    if (els.aplusProductInfo && nextInfo) {
+      els.aplusProductInfo.value = nextInfo;
+      state.aplus.productInfo = els.aplusProductInfo.value;
+    }
+    if (els.aplusProductName) state.aplus.productName = els.aplusProductName.value;
+    setInlineAiStatus("aplus", "AI帮写完成", "success");
+    setScopedProgress("aplus", 100, "A+ AI帮写完成", "success");
+    if (els.aplusStatusLine) els.aplusStatusLine.textContent = "AI帮写完成，可修改商品卖点&要求后生成 A+ 详情页";
+    return true;
+  } catch (error) {
+    setInlineAiStatus("aplus", `AI帮写失败：${shortErrorMessage(error)}`, "failed");
+    setScopedProgress("aplus", 100, `A+ AI帮写失败：${shortErrorMessage(error)}`, "failed");
+    showPromptFailureModal(error, "A+ AI帮写失败", analyzeAplusProduct, "aplus");
+    if (els.aplusStatusLine) els.aplusStatusLine.textContent = "A+ AI帮写失败";
     return false;
   } finally {
     setBusy(false);
@@ -2351,23 +4477,29 @@ async function generateTitle() {
   }
 }
 
-function renderResults(results) {
-  state.liveResults = Array.isArray(results) ? results.slice() : [];
-  if (!results.length) {
-    els.results.className = "results empty";
-    els.results.innerHTML = emptyTigerMarkup("sleeping");
-    selectResult(-1);
+function renderResults(results, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  setScopedResults(key, results);
+  const safeResults = scopedResults(key);
+  const container = activeResultsContainer(key);
+  if (!safeResults.length) {
+    if (container) {
+      container.className = "results empty";
+      container.innerHTML = "";
+    }
+    selectResult(-1, key);
     return;
   }
 
-  els.results.className = "results";
-  els.results.innerHTML = "";
+  if (!container) return;
+  container.className = "results";
+  container.innerHTML = "";
 
-  for (const [index, result] of results.entries()) {
-    const card = buildResultCard(result, index);
-    els.results.appendChild(card);
+  for (const [index, result] of safeResults.entries()) {
+    const card = buildResultCard(result, index, key);
+    container.appendChild(card);
   }
-  selectResult(0);
+  selectResult(0, key);
 }
 
 function resetRepairCanvas() {
@@ -2459,53 +4591,54 @@ function endRepairDrawing() {
   repairLastPoint = null;
 }
 
-function resetLiveResults() {
-  state.liveResults = [];
-  state.liveCompletedCount = 0;
-  state.liveTotalCount = 0;
-  state.liveProgressByIndex = {};
-  state.selectedResultIndex = -1;
-  els.results.className = "results empty tiger-workspace";
-  els.results.innerHTML = emptyTigerMarkup("working");
-  updateSelectedResultPanel();
+function resetLiveResults(scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  setScopedResults(key, []);
+  setScopedLiveCompletedCount(key, 0);
+  setScopedLiveTotalCount(key, 0);
+  resetScopedLiveProgress(key);
+  setScopedSelectedIndex(key, -1);
+  const container = activeResultsContainer(key);
+  if (container) {
+    container.className = "results empty tiger-workspace";
+    container.innerHTML = "";
+  }
+  updateSelectedResultPanel(key);
 }
 
-function renderSuitePlan(plan = null) {
-  state.suitePlan = plan || null;
-  const styleBox = els.styleMasterBox;
-  const status = els.suitePlanStatus;
-  if (!styleBox) return;
-  if (!plan) {
-    styleBox.className = "style-master-box empty";
-    styleBox.textContent = "";
-    if (status) status.textContent = "";
-    return;
+function renderSuitePlan(plan = null, scope = "image") {
+  const key = normalizeResultScope(scope);
+  setScopedSuitePlan(key, null);
+  if (key !== "image") return;
+  if (els.styleMasterBox) {
+    els.styleMasterBox.className = "style-master-box empty hidden";
+    els.styleMasterBox.textContent = "";
   }
-
-  const master = plan.style_master || plan.styleMaster || {};
-  const identity = plan.identity_lock || plan.identityLock || "";
-  const parts = [
-    master.visual_tone || master.visualTone,
-    master.palette || master.color_system || master.colorSystem,
-    master.typography || master.font_system || master.fontSystem,
-    master.layout_system || master.layoutSystem,
-    identity
-  ].filter(Boolean);
-
-  styleBox.className = "style-master-box";
-  styleBox.innerHTML = parts.length
-    ? parts.map((part) => `<span>${escapeHtml(part)}</span>`).join("")
-    : "<span>已生成风格母版，等待分镜提示词。</span>";
-  if (status) {
-    status.textContent = "";
-  }
+  if (els.suitePlanStatus) els.suitePlanStatus.textContent = "";
 }
 
-function renderPromptPlan(items = []) {
-  state.promptPlan = Array.isArray(items) ? items.slice() : [];
+function formatPlanDisplayText(value, fallback = "") {
+  if (value === undefined || value === null) return fallback;
+  if (Array.isArray(value)) {
+    const text = value.map((item) => formatPlanDisplayText(item, "")).filter(Boolean).join(" / ");
+    return text || fallback;
+  }
+  if (typeof value === "object") {
+    const text = Object.values(value).map((item) => formatPlanDisplayText(item, "")).filter(Boolean).join(" / ");
+    return text || fallback;
+  }
+  const text = String(value).trim();
+  return text && text !== "[object Object]" ? text : fallback;
+}
+
+function renderPromptPlan(items = [], scope = "image") {
+  const key = normalizeResultScope(scope);
+  setScopedPromptPlan(key, items);
+  if (key !== "image") return;
+  const promptItems = scopedPromptPlan(key);
   const list = els.promptPlanList;
   if (!list) return;
-  if (!state.promptPlan.length) {
+  if (!promptItems.length) {
     list.className = "prompt-plan-list empty";
     list.textContent = "";
     return;
@@ -2513,12 +4646,12 @@ function renderPromptPlan(items = []) {
 
   list.className = "prompt-plan-list";
   list.innerHTML = "";
-  for (const item of state.promptPlan) {
+  for (const item of promptItems) {
     const row = document.createElement("article");
     row.className = "prompt-plan-item";
     const label = item.kind || "结果图";
     const order = Number(item.index || 0);
-    const prompt = String(item.prompt || item.localPrompt || "").trim();
+    const prompt = normalizePromptDisplayText(formatPlanDisplayText(item.prompt || item.localPrompt || "", ""));
     row.innerHTML = `
       <div class="prompt-plan-head">
         <strong>${order ? `${order}. ` : ""}${escapeHtml(label)}</strong>
@@ -2527,10 +4660,14 @@ function renderPromptPlan(items = []) {
       <p>${escapeHtml(prompt.slice(0, 260))}${prompt.length > 260 ? "..." : ""}</p>
     `;
     row.addEventListener("click", () => {
-      if (order > 0 && state.liveResults[order - 1]) {
-        selectResult(order - 1);
+      if (order > 0 && scopedResults(key)[order - 1]) {
+        selectResult(order - 1, key);
       }
-      els.promptEditor.value = prompt;
+      openPromptDrawer({
+        kind: label,
+        prompt,
+        model: item.targetImageModel || ""
+      });
     });
     list.appendChild(row);
   }
@@ -2544,10 +4681,13 @@ function pendingCardTitle(item) {
   return title;
 }
 
-function renderGeneratingPlaceholder(total = 0, concurrency = 1) {
-  state.liveTotalCount = total;
-  els.results.className = "results empty generating-results";
-  els.results.innerHTML = `
+function renderGeneratingPlaceholder(total = 0, concurrency = 1, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  setScopedLiveTotalCount(key, total);
+  const container = activeResultsContainer(key);
+  if (!container) return;
+  container.className = "results empty generating-results";
+  container.innerHTML = `
     <div class="generating-panel">
       <div class="generation-loader generation-loader-large" aria-hidden="true">
         <span></span>
@@ -2560,10 +4700,11 @@ function renderGeneratingPlaceholder(total = 0, concurrency = 1) {
   `;
 }
 
-function clearGeneratingPlaceholder() {
-  if (!els.results.classList.contains("generating-results")) return;
-  els.results.className = "results";
-  els.results.innerHTML = "";
+function clearGeneratingPlaceholder(scope = generationResultScope()) {
+  const container = activeResultsContainer(scope);
+  if (!container || !container.classList.contains("generating-results")) return;
+  container.className = "results";
+  container.innerHTML = "";
 }
 
 function createPendingResultCard(item) {
@@ -2585,22 +4726,26 @@ function createPendingResultCard(item) {
   return card;
 }
 
-function renderPendingResults(items, concurrency = 1) {
+function renderPendingResults(items, concurrency = 1, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
   const safeItems = Array.isArray(items) ? items : [];
   if (!safeItems.length) {
-    renderGeneratingPlaceholder(0, concurrency);
+    renderGeneratingPlaceholder(0, concurrency, key);
     return;
   }
-  state.liveTotalCount = safeItems.length;
-  els.results.className = "results generating-results";
-  els.results.innerHTML = "";
+  setScopedLiveTotalCount(key, safeItems.length);
+  const container = activeResultsContainer(key);
+  if (!container) return;
+  container.className = "results generating-results";
+  container.innerHTML = "";
   for (const item of safeItems) {
-    els.results.appendChild(createPendingResultCard(item));
+    container.appendChild(createPendingResultCard(item));
   }
 }
 
-function updatePendingCard(progress) {
-  const card = els.results.querySelector(`[data-result-index="${progress.current}"]`);
+function updatePendingCard(progress, scope = generationResultScope()) {
+  const container = activeResultsContainer(scope);
+  const card = container?.querySelector(`[data-result-index="${progress.current}"]`);
   if (!card) return;
   const status = card.querySelector("[data-pending-status]");
   if (!status) return;
@@ -2614,25 +4759,30 @@ function updatePendingCard(progress) {
   status.textContent = `${stageLabels[progress.stage] || progress.status || "生成中"}${progressText}`;
 }
 
-function replaceResultCard(result, index, resultNumber) {
-  clearGeneratingPlaceholder();
-  const existing = els.results.querySelector(`[data-result-index="${index}"]`);
-  const card = buildResultCard(result, resultNumber);
+function replaceResultCard(result, index, resultNumber, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  clearGeneratingPlaceholder(key);
+  const container = activeResultsContainer(key);
+  if (!container) return;
+  const existing = container.querySelector(`[data-result-index="${index}"]`);
+  const card = buildResultCard(result, resultNumber, key);
   card.dataset.resultIndex = String(index);
   if (existing) {
     existing.replaceWith(card);
   } else {
-    els.results.appendChild(card);
+    container.appendChild(card);
   }
-  if (!els.results.querySelector(".result-card-pending")) {
-    els.results.classList.remove("empty", "generating-results");
+  if (!container.querySelector(".result-card-pending")) {
+    container.classList.remove("empty", "generating-results");
   }
 }
 
-function buildResultCard(result, index) {
+function buildResultCard(result, index, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
   const card = document.createElement("article");
   card.className = `result-card${result.url ? "" : " result-card-status"}`;
   card.dataset.liveIndex = String(index);
+  card.dataset.scope = key;
   const title = result.kind || "结果图";
   const statusText = result.status === "timeout"
     ? "超时"
@@ -2641,15 +4791,21 @@ function buildResultCard(result, index) {
       : "";
 
   if (result.url) {
+    const promptWarning = result.promptError || "";
+    const promptMeta = promptWarning
+      ? `<small class="result-prompt-note">${escapeHtml(promptWarning)}</small>`
+      : "";
     card.innerHTML = `
       <img src="${result.url}" alt="">
       <div class="result-meta">${title}${result.model ? ` · ${result.model}` : ""}${result.imageSize ? ` · ${result.imageSize}` : ""}</div>
+      ${promptMeta}
       <div class="result-actions">
         <button data-action="save" data-url="${result.url}">保存</button>
         <button data-action="open" data-url="${result.url}">打开</button>
+        <button data-action="prompt" type="button">提示词</button>
       </div>
     `;
-    bindResultCardActions(card, result, index);
+    bindResultCardActions(card, result, index, key);
   } else {
     card.innerHTML = `
       <div class="result-status-box">
@@ -2661,23 +4817,46 @@ function buildResultCard(result, index) {
 
   card.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
-    selectResult(index);
+    selectResult(index, key);
   });
   return card;
 }
 
-function appendResultCard(result, index) {
-  if (!state.liveResults.length) {
-    els.results.className = "results";
-    els.results.innerHTML = "";
+function appendResultCard(result, index, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  if (!scopedResults(key).length) {
+    const container = activeResultsContainer(key);
+    if (container) {
+      container.className = "results";
+      container.innerHTML = "";
+    }
   }
 
-  clearGeneratingPlaceholder();
-  els.results.appendChild(buildResultCard(result, index));
+  clearGeneratingPlaceholder(key);
+  activeResultsContainer(key)?.appendChild(buildResultCard(result, index, key));
 }
 
-function bindResultCardActions(card, result, index) {
+function resultFailureBucket(result = {}) {
+  const message = `${result.promptSource || ""} ${result.error || ""}`;
+  if (/prompt-api-failed|提示词|分镜|分类/.test(message)) return "提示词生成失败";
+  if (/timeout|超时/i.test(message)) return "作图超时";
+  return "作图失败";
+}
+
+function ensureResultScopeVisible(scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
+  if (visibleResultScope() !== key) {
+    setRoute(key);
+  }
+  state.activeGenerationView = key;
+  return key;
+}
+
+function bindResultCardActions(card, result, index, scope = generationResultScope()) {
+  const key = normalizeResultScope(scope);
   card.querySelector('[data-action="save"]')?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     try {
       const filePath = await window.studio.saveImage({
         url: event.currentTarget.dataset.url,
@@ -2689,25 +4868,61 @@ function bindResultCardActions(card, result, index) {
     }
   });
 
-  card.querySelector('[data-action="open"]')?.addEventListener("click", () => {
+  card.querySelector('[data-action="open"]')?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    selectResult(index, key);
     openImageViewer(result.url, result.kind || "图片预览");
   });
 
-  card.querySelector("img")?.addEventListener("dblclick", () => {
+  card.querySelector('[data-action="prompt"]')?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    selectResult(index, key);
+    openPromptDrawer(result);
+  });
+
+  card.querySelector("img")?.addEventListener("dblclick", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    selectResult(index, key);
     openImageViewer(result.url, result.kind || "图片预览");
   });
 }
 
-function currentSelectedResult() {
-  if (state.selectedResultIndex < 0) return null;
-  return state.liveResults[state.selectedResultIndex] || null;
+function openPromptDrawer(result = currentSelectedResult()) {
+  if (!els.promptDrawer || !els.promptDrawerText) return;
+  if (els.promptDrawer.parentElement !== document.body) document.body.appendChild(els.promptDrawer);
+  const prompt = result?.prompt || result?.finalPrompt || "";
+  els.promptDrawerText.value = prompt || "这张图没有返回可查看的提示词。";
+  if (els.promptDrawerMeta) {
+    els.promptDrawerMeta.textContent = result
+      ? `${result.kind || "结果图"}${result.model ? ` · ${result.model}` : ""}${result.imageSize ? ` · ${result.imageSize}` : ""}`
+      : "";
+  }
+  els.promptDrawer.classList.remove("hidden");
 }
 
-function updateSelectedResultPanel() {
-  const result = currentSelectedResult();
-  $$(".result-card").forEach((card) => {
-    card.classList.toggle("selected", Number(card.dataset.liveIndex) === state.selectedResultIndex);
+function closePromptDrawer() {
+  els.promptDrawer?.classList.add("hidden");
+}
+
+function currentSelectedResult(scope = "image") {
+  const key = normalizeResultScope(scope);
+  const index = scopedSelectedIndex(key);
+  if (index < 0) return null;
+  return scopedResults(key)[index] || null;
+}
+
+function updateSelectedResultPanel(scope = "image") {
+  const key = normalizeResultScope(scope);
+  const result = currentSelectedResult(key);
+  const selectedIndex = scopedSelectedIndex(key);
+  const container = activeResultsContainer(key) || document;
+  Array.from(container.querySelectorAll(".result-card")).forEach((card) => {
+    card.classList.toggle("selected", Number(card.dataset.liveIndex) === selectedIndex);
   });
+  if (key !== "image") return;
 
   const hasImage = Boolean(result?.url);
   if (els.selectedPreviewImg) {
@@ -2729,18 +4944,18 @@ function updateSelectedResultPanel() {
   }
   if (els.saveSelectedBtn) els.saveSelectedBtn.disabled = !hasImage;
   if (els.openSelectedBtn) els.openSelectedBtn.disabled = !hasImage;
-  if (els.regenerateSelectedBtn) els.regenerateSelectedBtn.disabled = !result;
-  setupRepairCanvasForResult(result);
+  if (els.regenerateSelectedBtn) els.regenerateSelectedBtn.disabled = true;
 }
 
-function selectResult(index) {
+function selectResult(index, scope = "image") {
+  const key = normalizeResultScope(scope);
   const safeIndex = Number(index);
-  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= state.liveResults.length) {
-    state.selectedResultIndex = -1;
+  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= scopedResults(key).length) {
+    setScopedSelectedIndex(key, -1);
   } else {
-    state.selectedResultIndex = safeIndex;
+    setScopedSelectedIndex(key, safeIndex);
   }
-  updateSelectedResultPanel();
+  updateSelectedResultPanel(key);
 }
 
 async function saveSelectedResult() {
@@ -2803,7 +5018,7 @@ async function regenerateSelectedResult() {
     selectResult(state.selectedResultIndex);
     await loadHistory();
     setProgressSuccess("重生成完成");
-    setTimeout(() => els.progressBox.classList.add("hidden"), 900);
+    hideProgressLater(900);
   } catch (error) {
     setProgressFailed(`重生成失败：${shortErrorMessage(error)}`);
     showFailureModal(error, "单张重生成失败", regenerateSelectedResult);
@@ -2859,7 +5074,7 @@ async function repairSelectedResult() {
     openRepairResultModal(nextResult);
     await loadHistory();
     setProgressSuccess("局部修复完成");
-    setTimeout(() => els.progressBox.classList.add("hidden"), 900);
+    hideProgressLater(900);
   } catch (error) {
     setProgressFailed(`局部修复失败：${shortErrorMessage(error)}`);
     showFailureModal(error, "局部修复失败", repairSelectedResult);
@@ -2869,8 +5084,15 @@ async function repairSelectedResult() {
   }
 }
 
+function mountGlobalImageViewer() {
+  if (!els.imageViewer || els.imageViewer.parentElement === document.body) return;
+  document.body.appendChild(els.imageViewer);
+}
+
 function openImageViewer(url, title = "图片预览") {
   if (!url) return;
+  mountGlobalImageViewer();
+  currentViewerImage = { url, title };
   els.imageViewerTitle.textContent = title;
   els.imageViewerImg.src = url;
   els.imageViewer.classList.remove("hidden");
@@ -2879,89 +5101,347 @@ function openImageViewer(url, title = "图片预览") {
 function closeImageViewer() {
   els.imageViewer.classList.add("hidden");
   els.imageViewerImg.src = "";
+  currentViewerImage = null;
 }
 
-async function generate() {
-  if (!ensureSupportedImageGeneration("批量套图生成")) return;
-  let payload = buildPayload();
-  if (!payload.imageKinds.length) {
-    toast("至少选择一种图片类型。", "error");
+async function saveViewerImage() {
+  if (!currentViewerImage?.url) {
+    toast("当前没有可保存的图片。", "error");
     return;
   }
-
-  if (state.productFactsReviewPending || (state.lastAnalyzedProductFacts && currentProductFactsSignature() !== state.lastAnalyzedProductFacts)) {
-    state.productFactsReviewPending = true;
-    showAnalysisRequiredModal();
-    return;
-  }
-
-  if (!els.promptBox.value.trim()) {
-    const analyzed = await analyze();
-    if (!analyzed) return;
-    payload = buildPayload();
-  }
-
-  const finalPrompt = els.promptBox.value.trim();
-  if (!finalPrompt) {
-    toast("缺少最终生图提示词。", "error");
-    return;
-  }
-  const model = resolveCurrentImageModel();
-  if (!supportsModelResolution(model, state.resolution)) {
-    showMessageModal(`当前模型 ${model} 不支持 ${state.resolution}。请在左侧切换模型或分辨率后再生成。`, "模型与分辨率不匹配", "error");
-    return;
-  }
-
-  setBusy(true, "正在提交 Grsai 生成任务");
-  setProgress(2, "准备提交");
-  const generationId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  state.activeGenerationId = generationId;
-  resetLiveResults();
-  renderSuitePlan(null);
-  renderPromptPlan([]);
-  state.liveTotalCount = getImageKindPlans().reduce((sum, item) => sum + item.count, 0);
   try {
-    const output = await window.studio.generateImage({
-      ...payload,
-      generationId,
-      analysis: state.analysis || {},
-      finalPrompt,
-      negativePrompt: state.analysis?.negative_prompt_en || ""
-    });
-    renderSuitePlan(output.suitePlan || state.suitePlan);
-    renderPromptPlan(output.promptPlan || state.promptPlan);
-    if (!state.liveResults.length) {
-      renderResults(output.results || []);
+    const safeTitle = String(currentViewerImage.title || "ai-image")
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 60) || "ai-image";
+    await saveImageUrl(currentViewerImage.url, `${safeTitle}-${Date.now()}.png`);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function validateFeatureGenerationPayload(payload, label) {
+  if (!ensureSupportedImageGeneration(label)) return false;
+  if (!payload.images.length) {
+    showMessageModal("请先上传产品图。", "缺少产品图", "error");
+    return false;
+  }
+  if (!payload.productInfo.trim()) {
+    showMessageModal("请先填写商品名称或商品卖点&要求，也可以先点击 AI帮写。", "缺少商品资料", "error");
+    return false;
+  }
+  if (!payload.imageKinds.length) {
+    showMessageModal("请至少选择一个要生成的模块。", "缺少生成模块", "error");
+    return false;
+  }
+  const scope = normalizeResultScope(payload.featureScope || "image");
+  const model = payload.imageModelRoute || resolveImageModelForScope(scope);
+  const resolution = payload.resolution || state.resolution;
+  if (!supportsModelResolution(model, resolution)) {
+    showMessageModal(`当前模型 ${model} 不支持 ${resolution}。请先切换模型或分辨率。`, "模型与分辨率不匹配", "error");
+    return false;
+  }
+  return true;
+}
+
+async function compactGenerationPayload(payload = {}) {
+  return {
+    ...payload,
+    images: await compactPromptImages(payload.images || [], 6, 1600),
+    referenceImages: await compactPromptImages(payload.referenceImages || [], 20, 1400)
+  };
+}
+
+function generationOutcomeSummary(results = [], expectedTotal = 0) {
+  const safeResults = Array.isArray(results) ? results : [];
+  const total = Math.max(Number(expectedTotal || 0), safeResults.length);
+  const successCount = safeResults.filter((item) => item?.url).length;
+  const failedResults = safeResults.filter((item) => !item?.url);
+  const missingCount = Math.max(0, total - safeResults.length);
+  const failureMap = failedResults.reduce((acc, item) => {
+    const bucket = resultFailureBucket(item);
+    acc[bucket] = (acc[bucket] || 0) + 1;
+    return acc;
+  }, {});
+  if (missingCount) failureMap["未返回结果"] = (failureMap["未返回结果"] || 0) + missingCount;
+  const failedCount = Object.values(failureMap).reduce((sum, count) => sum + count, 0);
+  const failureSummary = Object.entries(failureMap)
+    .map(([name, count]) => `${name} ${count} 张`)
+    .join("；");
+  return { total, successCount, failedCount, failureSummary };
+}
+
+async function submitFeatureGeneration(payload, view, label) {
+  const scope = normalizeResultScope(view);
+  state.activeGenerationView = scope;
+  payload.featureScope = scope;
+  payload.imageModelRoute = payload.imageModelRoute || resolveImageModelForScope(scope);
+  if (!validateFeatureGenerationPayload(payload, label)) return;
+  payload.promptConfig = {
+    promptProvider: state.config?.promptProvider || "custom",
+    promptBaseUrl: state.config?.promptBaseUrl || "",
+    promptApiKey: state.config?.promptApiKey || "",
+    promptModel: state.config?.promptModel || "",
+    promptEndpoint: state.config?.promptEndpoint || "chat",
+    promptProviderApiOptions: state.config?.promptProviderApiOptions || {},
+    promptModelCapabilities: state.config?.promptModelCapabilities || {}
+  };
+  payload.promptConfig = promptConfigForScope(scope);
+  const promptVisionInputs = [
+    ...(payload.images || []),
+    ...(payload.referenceImages || [])
+  ].filter(Boolean);
+  if (!ensureVisionModelForImages(`${label} AI提示词规划`, promptVisionInputs, payload.promptConfig)) return;
+  payload.requireVisionPromptModel = promptVisionInputs.length > 0;
+
+  const generationId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  rememberGenerationScope(generationId, scope);
+  state.activeGenerationId = generationId;
+  state.generationProgressReceived = false;
+  startGenerationWatchdog(generationId, scope);
+  markGenerationHeartbeat();
+  setBusy(true, `正在生成${label}`);
+  setActiveGenerationProgress(2, "正在压缩参考图并提交后台任务", "active", scope);
+  setScopedLiveTotalCount(scope, payload.imageKinds.reduce((sum, item) => sum + Number(item.count || 0), 0));
+  try {
+    const outboundPayload = await compactGenerationPayload(payload);
+    const accepted = await Promise.race([
+      window.studio.generateImage({
+        ...outboundPayload,
+        generationId,
+        analysis: analysisForScope(scope) || {},
+        finalPrompt: scope === "image" ? (els.promptBox?.value.trim() || "") : "",
+        negativePrompt: analysisForScope(scope)?.negative_prompt_en || "",
+        rendererBuildId: RENDERER_BUILD_ID
+      }),
+      new Promise((_, reject) => window.setTimeout(() => reject(new Error("提交到后台超过 15 秒仍未响应，主进程可能卡住。请关闭软件后重新打开。")), 15000))
+    ]);
+    if (!accepted?.accepted) throw new Error("后台没有确认接收生成任务。");
+    resetLiveResults(scope);
+    const output = await waitForGenerationFinish(generationId);
+    renderResults(output.results || [], scope);
+    const expectedTotal = payload.imageKinds.reduce((sum, item) => sum + Number(item.count || 0), 0);
+    const outcome = generationOutcomeSummary(output.results || [], expectedTotal);
+    const statusLine = scopedStatusLine(scope);
+    if (outcome.successCount === 0 && outcome.failedCount > 0) {
+      const message = `${label}失败：${outcome.failureSummary || `${outcome.failedCount} 张图片失败或超时`}`;
+      setActiveGenerationProgress(100, message, "failed", scope);
+      if (statusLine) statusLine.textContent = message;
+    } else {
+      const message = `${label}完成：成功 ${outcome.successCount}/${outcome.total || outcome.successCount} 张${outcome.failedCount ? `，${outcome.failureSummary || `失败/超时 ${outcome.failedCount} 张`}` : ""}`;
+      setActiveGenerationProgress(100, message, outcome.failedCount ? "active" : "success", scope);
+      if (statusLine) statusLine.textContent = message;
     }
     await loadHistory();
-    const successCount = (output.results || []).filter((item) => item.url).length;
-    const failedCount = Math.max(0, (output.results || []).length - successCount);
-    if (successCount === 0 && failedCount > 0) {
-      els.statusLine.textContent = `生成失败，${failedCount} 张图片失败或超时`;
-      setProgressFailed(`生成失败：${failedCount} 张图片失败或超时`);
-    } else {
-      els.statusLine.textContent = `生成完成，成功 ${successCount} 张${failedCount ? `，失败/超时 ${failedCount} 张` : ""}`;
-      setProgressSuccess(failedCount ? `生成完成，${failedCount} 张失败或超时` : "生成完成");
-      setTimeout(() => els.progressBox.classList.add("hidden"), 900);
-    }
   } catch (error) {
-    setProgressFailed(`生成失败：${shortErrorMessage(error)}`);
-    showFailureModal(error, "图片生成失败", generate);
-    els.statusLine.textContent = "生成失败";
+    setActiveGenerationProgress(100, `${label}失败：${shortErrorMessage(error)}`, "failed", scope);
+    showFailureModal(error, `${label}失败`, () => submitFeatureGeneration(payload, view, label));
   } finally {
+    stopGenerationWatchdog();
     state.activeGenerationId = null;
     setBusy(false);
   }
 }
 
+async function generateAplusPage() {
+  const payload = buildAplusPayload();
+  if (!selectedAplusModules().length) {
+    showMessageModal("请至少选择一个 A+ 模块。", "缺少模块", "error");
+    return;
+  }
+  await submitFeatureGeneration(payload, "aplus", "A+详情页");
+}
+
+async function generate() {
+  state.activeGenerationView = "image";
+  logClientEvent("renderer-generate-enter");
+  if (!ensureSupportedImageGeneration("批量套图生成")) return;
+  let payload = buildPayload();
+  logClientEvent("renderer-generate-payload-built", {
+    imageKinds: payload.imageKinds,
+    resolution: payload.resolution,
+    ratio: payload.ratio,
+    imageModelRoute: payload.imageModelRoute,
+    hasPrompt: Boolean(els.promptBox.value.trim())
+  });
+  if (!payload.imageKinds.length) {
+    logClientEvent("renderer-generate-no-image-kind");
+    toast("至少选择一种图片类型。", "error");
+    return;
+  }
+  if (!hasProductInfoInput() && payload.images.length === 0) {
+    toast("请先上传商品图或填写产品名称。", "error");
+    return;
+  }
+
+  const currentFactsSignature = currentProductFactsSignature();
+  const analysisSignatureMatches = state.lastAnalyzedProductFacts === currentFactsSignature;
+  if (!analysisSignatureMatches) {
+    state.analysis = null;
+    state.lastAnalyzedProductFacts = "";
+    state.productFactsReviewPending = false;
+  }
+  logClientEvent("renderer-generate-analysis-check", {
+    requiresManualAnalysis: false,
+    hasFreshAnalysis: Boolean(state.analysis && analysisSignatureMatches),
+    hasPrompt: Boolean(els.promptBox.value.trim()),
+    analysisSignatureMatches
+  });
+
+  const finalPrompt = els.promptBox.value.trim() || payload.productInfo.trim();
+  const model = resolveCurrentImageModel();
+  if (!supportsModelResolution(model, state.resolution)) {
+    logClientEvent("renderer-generate-model-resolution-blocked", { model, resolution: state.resolution });
+    showMessageModal(`当前模型 ${model} 不支持 ${state.resolution}。请在左侧切换模型或分辨率后再生成。`, "模型与分辨率不匹配", "error");
+    return;
+  }
+
+  payload.promptConfig = promptConfigForScope("image");
+  if (!ensureVisionModelForImages("图片制作 AI提示词规划", payload.images, payload.promptConfig)) return;
+  payload.requireVisionPromptModel = (payload.images || []).length > 0;
+
+  const generationId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  rememberGenerationScope(generationId, "image");
+  logClientEvent("renderer-generate-click", { generationId, model });
+  state.activeGenerationId = generationId;
+  state.generationProgressReceived = false;
+  startGenerationWatchdog(generationId);
+  markGenerationHeartbeat();
+
+  try {
+    logClientEvent("renderer-before-submit-ui", {
+      generationId,
+      imageKindCount: payload.imageKinds.length
+    });
+
+  setBusy(true, "正在提交 Grsai 生成任务");
+  cancelProgressHideTimer();
+  resetWorkflowSteps("generate");
+  setWorkflowStep("analysis", "done", "商品资料已确认");
+  setWorkflowStep("planning", "active", "正在提交后台任务");
+  setProgress(2, "正在提交后台任务");
+  setScopedLiveTotalCount("image", payload.imageKinds.reduce((sum, item) => sum + Number(item.count || 0), 0));
+  logClientEvent("renderer-ui-prepared-before-runtime-info", {
+    generationId,
+    liveTotalCount: scopedLiveTotalCount("image")
+  });
+    logClientEvent("renderer-before-runtime-info", { generationId });
+    const runtimeInfo = await Promise.race([
+      window.studio.getRuntimeInfo?.(),
+      new Promise((_, reject) => window.setTimeout(() => reject(new Error("无法读取主进程运行版本。")), 3000))
+    ]);
+    logClientEvent("renderer-runtime-info-ok", {
+      generationId,
+      runtimeBuildId: runtimeInfo?.buildId,
+      runtimeVersion: runtimeInfo?.version
+    });
+    if (!runtimeInfo?.buildId || !String(runtimeInfo.buildId).includes("bg-ipc-v2")) {
+      throw new Error(`主进程版本不匹配：${runtimeInfo?.buildId || "未知"}。请完全关闭软件后重新打开最新版。`);
+    }
+    logClientEvent("renderer-before-generate-ipc", {
+      generationId,
+      imageKinds: payload.imageKinds,
+      liveTotalCount: scopedLiveTotalCount("image")
+    });
+    const outboundPayload = await compactGenerationPayload(payload);
+    const accepted = await Promise.race([
+      window.studio.generateImage({
+        ...outboundPayload,
+        generationId,
+        analysis: state.analysis || {},
+        finalPrompt,
+        negativePrompt: state.analysis?.negative_prompt_en || "",
+        rendererBuildId: RENDERER_BUILD_ID
+      }),
+      new Promise((_, reject) => window.setTimeout(() => reject(new Error("提交到后台超过 15 秒仍未响应，主进程可能卡住。请关闭软件后重新打开。")), 15000))
+    ]);
+    logClientEvent("renderer-generate-ipc-returned", { generationId, accepted });
+    if (!accepted?.accepted) {
+      throw new Error("后台没有确认接收生成任务。");
+    }
+    markGenerationHeartbeat();
+    state.generationProgressReceived = true;
+    setWorkflowStep("planning", "active", "后台已接收任务");
+    setProgress(2, "后台已接收生成任务，等待执行进度");
+    runUiSafely("prepare-live-results-after-submit", () => {
+      resetLiveResults("image");
+      renderSuitePlan(null, "image");
+      renderPromptPlan([], "image");
+    });
+    logClientEvent("renderer-wait-generation-finish", { generationId });
+    const output = await waitForGenerationFinish(generationId);
+    logClientEvent("renderer-generation-finish", {
+      generationId,
+      resultCount: output?.results?.length || 0,
+      promptPlanCount: output?.promptPlan?.length || 0
+    });
+    runUiSafely("render-generation-plan", () => {
+      renderSuitePlan(output.suitePlan || state.suitePlan, "image");
+      renderPromptPlan(output.promptPlan || state.promptPlan, "image");
+    });
+    if (!scopedResults("image").length) {
+      runUiSafely("render-final-results", () => renderResults(output.results || [], "image"));
+    }
+    await loadHistory();
+    const successCount = (output.results || []).filter((item) => item.url).length;
+    const failedCount = Math.max(0, (output.results || []).length - successCount);
+    const failureSummary = Object.entries((output.results || [])
+      .filter((item) => !item.url)
+      .reduce((acc, item) => {
+        const bucket = resultFailureBucket(item);
+        acc[bucket] = (acc[bucket] || 0) + 1;
+        return acc;
+      }, {}))
+      .map(([label, count]) => `${label} ${count} 张`)
+      .join("；");
+    if (successCount === 0 && failedCount > 0) {
+      els.statusLine.textContent = `生成失败：${failureSummary || `${failedCount} 张图片失败或超时`}`;
+      setProgressFailed(`生成失败：${failureSummary || `${failedCount} 张图片失败或超时`}`);
+    } else {
+      els.statusLine.textContent = `生成完成，成功 ${successCount} 张${failedCount ? `，${failureSummary || `失败/超时 ${failedCount} 张`}` : ""}`;
+      completeWorkflow(failedCount ? `完成，${failedCount} 张异常` : "全部完成");
+      setProgressSuccess(failedCount ? `生成完成：${failureSummary || `${failedCount} 张失败或超时`}` : "生成完成");
+      hideProgressLater(900);
+    }
+  } catch (error) {
+    logClientEvent("renderer-generation-error", {
+      generationId,
+      error: shortErrorMessage(error)
+    });
+    const active = state.workflowSteps?.find((step) => step.status === "active");
+    if (active) failWorkflowStep(active.id, shortErrorMessage(error));
+    setProgressFailed(`生成失败：${shortErrorMessage(error)}`);
+    showFailureModal(error, "图片生成失败", generate);
+    els.statusLine.textContent = "生成失败";
+  } finally {
+    stopGenerationWatchdog();
+    state.activeGenerationId = null;
+    state.activeGenerationStartedAt = 0;
+    state.lastGenerationProgressAt = 0;
+    state.generationProgressReceived = false;
+    setBusy(false);
+  }
+}
+
+function inferHistoryFeatureScope(item = {}) {
+  if (item.featureScope) return normalizeResultScope(item.featureScope);
+  const kindText = (item.imageKinds || [])
+    .map((kind) => `${kind?.kind || ""} ${kind?.module || ""}`)
+    .join(" ");
+  if (/A\+|高级A\+/i.test(kindText)) return "aplus";
+  return "image";
+}
+
 function renderHistory(items) {
+  if (!els.historyList) return;
   els.historyList.innerHTML = "";
-  if (!items.length) {
+  const imageItems = (Array.isArray(items) ? items : []).filter((item) => inferHistoryFeatureScope(item) === "image");
+  if (!imageItems.length) {
     els.historyList.innerHTML = '<div class="muted">暂无历史记录</div>';
     return;
   }
 
-  for (const item of items.slice(0, 8)) {
+  for (const item of imageItems.slice(0, 8)) {
     const row = document.createElement("div");
     row.className = "history-item";
     const created = new Date(item.createdAt).toLocaleString();
@@ -2973,15 +5453,18 @@ function renderHistory(items) {
       <button class="secondary-button">载入</button>
     `;
     row.querySelector("button").addEventListener("click", () => {
+      state.analysis = null;
+      state.lastAnalyzedProductFacts = "";
+      state.productFactsReviewPending = false;
       els.promptBox.value = item.prompt || "";
       renderSuitePlan(item.suitePlan || null);
       renderPromptPlan(item.promptPlan || []);
       if (item.results?.length) {
-        renderResults(item.results);
+        renderResults(item.results, "image");
         els.statusLine.textContent = "已载入历史记录";
       } else {
         els.results.className = "results empty";
-        els.results.innerHTML = emptyTigerMarkup("sleeping");
+        els.results.innerHTML = "";
         els.statusLine.textContent = "已载入历史提示词，图片已过期或被清理";
       }
     });
@@ -3017,6 +5500,7 @@ async function recoverHistoryFromCache() {
     toast("当前版本未暴露缓存恢复接口。", "error");
     return;
   }
+  if (!els.recoverHistoryBtn) return;
   els.recoverHistoryBtn.disabled = true;
   try {
     const result = await window.studio.recoverHistoryFromCache();
@@ -3068,7 +5552,7 @@ function openBrandDrawer() {
   $("#language").value = state.brand.language || "English";
   $("#platform").value = state.brand.platform || "Amazon";
   $("#customStyle").value = state.brand.customStyle || "";
-  els.brandDrawer.classList.remove("hidden");
+  showOverlay(els.brandDrawer);
 }
 
 function saveBrand() {
@@ -3099,9 +5583,12 @@ function openSettingsDrawer() {
   const imagePreset = IMAGE_PROVIDER_PRESETS[config.imageProvider || "grsai"] || IMAGE_PROVIDER_PRESETS.grsai;
   const isPresetImageProvider = (config.imageProvider || "grsai") !== "custom";
   $("#imageProviderType").value = isPresetImageProvider ? imagePreset.providerType : (config.imageProviderType || "custom");
-  $("#grsaiBaseUrl").value = isPresetImageProvider && Object.prototype.hasOwnProperty.call(imagePreset, "baseUrl") ? imagePreset.baseUrl : (config.grsaiBaseUrl || config.imageBaseUrl || "");
+  $("#grsaiBaseUrl").value = config.grsaiBaseUrl || config.imageBaseUrl || (isPresetImageProvider && Object.prototype.hasOwnProperty.call(imagePreset, "baseUrl") ? imagePreset.baseUrl : "");
   $("#grsaiApiKey").value = getSavedImageApiKey(config.imageProvider || "grsai") || config.grsaiApiKey || "";
-  $("#grsaiConcurrency").value = config.grsaiConcurrency || 6;
+  $("#grsaiConcurrency").value = Math.max(1, Math.min(10, Number(config.grsaiConcurrency || 6)));
+  if (els.updateManifestUrl) els.updateManifestUrl.value = config.updateManifestUrl || "";
+  if (els.updateCheckOnStartup) els.updateCheckOnStartup.checked = config.updateCheckOnStartup !== false;
+  setUpdateStatus("");
   syncPromptProviderUi();
   renderProviderList();
   const provider = state.selectedPromptProvider;
@@ -3109,7 +5596,7 @@ function openSettingsDrawer() {
   renderPromptModelList(provider);
   syncImageProviderUi();
   syncImageModelOptions(config.imageProvider || "grsai", config.grsai1kModel || config.image1kModel || "", config.grsai2kModel || config.image2kModel || "");
-  els.settingsDrawer.classList.remove("hidden");
+  showOverlay(els.settingsDrawer);
 }
 
 function getPromptProviderKeys() {
@@ -3266,7 +5753,14 @@ function handleImageProviderChange(provider) {
     syncProviderModelIcons();
     return;
   }
-  applyImageProviderPreset(provider, { silent: true });
+  $("#imageProviderType").value = preset.providerType || "custom";
+  if (Object.prototype.hasOwnProperty.call(preset, "baseUrl")) $("#grsaiBaseUrl").value = preset.baseUrl || "";
+  const savedRoute = getLastImageModel(provider, "route");
+  state.imageModelRoute = normalizeImageModelRoute(savedRoute || "auto");
+  state.ai.imageModelRoute = savedRoute || "";
+  syncImageModelOptions(provider, getLastImageModel(provider, "1k"), getLastImageModel(provider, "2k"));
+  $("#imageApiActionStatus").textContent = `已切换到 ${preset.label}。模型会优先使用你保存过的选择；需要恢复推荐配置时再点击“自动填充作图配置”。`;
+  populateAiImageModelSelect();
   syncProviderModelIcons();
 }
 
@@ -3453,6 +5947,34 @@ function setSelectModelOptions(selectId, customInputId, models, selectedModel = 
   syncProviderModelIcons();
 }
 
+function setSelectModelOptionsForElements(select, customInput, models, selectedModel = "") {
+  if (!select || !customInput) return;
+  const options = uniqueModelOptions(models);
+  const selected = String(selectedModel || "").trim();
+  const selectedMatchesList = !selected || options.includes(selected);
+  if (selected && !selectedMatchesList) {
+    options.push(selected);
+  }
+  select.innerHTML = "";
+  for (const model of options) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = model;
+    select.appendChild(option);
+  }
+  const customOption = document.createElement("option");
+  customOption.value = CUSTOM_MODEL_VALUE;
+  customOption.textContent = "手动输入其他模型";
+  select.appendChild(customOption);
+  select.value = selected && selectedMatchesList ? selected : options[0] || selected || CUSTOM_MODEL_VALUE;
+  customInput.classList.toggle("hidden", select.value !== CUSTOM_MODEL_VALUE);
+  if (select.value === CUSTOM_MODEL_VALUE && selected) {
+    customInput.value = selected;
+  } else if (select.value !== CUSTOM_MODEL_VALUE) {
+    customInput.value = "";
+  }
+}
+
 function getSelectedModelValue(selectId, customInputId) {
   const value = $(selectId).value;
   if (value === CUSTOM_MODEL_VALUE) return $(customInputId).value.trim();
@@ -3483,6 +6005,177 @@ function getSelectedPromptModel() {
   return value.trim();
 }
 
+function getSelectedMainPromptModel() {
+  const value = els.mainPromptModelSelect?.value || "";
+  if (value === CUSTOM_MODEL_VALUE) {
+    return els.mainPromptModelCustom?.value.trim() || "";
+  }
+  return value.trim();
+}
+
+function syncMainPromptModelCustomInput() {
+  const isCustom = els.mainPromptModelSelect?.value === CUSTOM_MODEL_VALUE;
+  els.mainPromptModelCustom?.classList.toggle("hidden", !isCustom);
+  if (isCustom) {
+    els.mainPromptModelCustom?.focus();
+    return;
+  }
+  applyMainPromptModelSelection();
+}
+
+function renderMainPromptModelSelect(selectedModel = state.config?.promptModel || "") {
+  if (!els.mainPromptModelSelect || !els.mainPromptModelCustom) return;
+  const provider = promptConfigForScope("image").promptProvider || state.config?.promptProvider || currentSettingsProvider();
+  const models = getProviderModelOptions(provider);
+  setSelectModelOptions("#mainPromptModelSelect", "#mainPromptModelCustom", models, selectedModel || state.config?.promptModel || "");
+}
+
+function promptScopeControls(scope = "image") {
+  const key = normalizePromptScope(scope);
+  if (key === "aplus") {
+    return {
+      provider: els.aplusPromptProviderSelect,
+      model: els.aplusPromptModelSelect,
+      custom: els.aplusPromptModelCustom,
+      test: els.aplusPromptModelTestBtn,
+      label: els.aplusPlanningModelLabel
+    };
+  }
+  if (key === "ai") {
+    return {
+      provider: els.aiPromptProviderSelect,
+      model: els.aiPromptModelSelect,
+      custom: els.aiPromptModelCustom,
+      test: null,
+      label: null
+    };
+  }
+  return {
+    provider: els.mainPromptProviderSelect,
+    model: els.mainPromptModelSelect,
+    custom: els.mainPromptModelCustom,
+    test: els.mainPromptModelTestBtn,
+    label: els.planningModelLabel
+  };
+}
+
+function setPromptProviderOptionsForElement(select, selectedProvider = "") {
+  if (!select) return;
+  const selected = selectedProvider || state.config?.promptProvider || currentSettingsProvider();
+  select.innerHTML = "";
+  for (const provider of allPromptProviders()) {
+    const option = document.createElement("option");
+    option.value = provider;
+    option.textContent = promptProviderLabel(provider);
+    select.appendChild(option);
+  }
+  if (selected && !Array.from(select.options).some((option) => option.value === selected)) {
+    const option = document.createElement("option");
+    option.value = selected;
+    option.textContent = promptProviderLabel(selected);
+    select.appendChild(option);
+  }
+  if (selected) select.value = selected;
+}
+
+function selectedScopePromptModel(scope = "image") {
+  const controls = promptScopeControls(scope);
+  const value = controls.model?.value || "";
+  if (value === CUSTOM_MODEL_VALUE) return controls.custom?.value.trim() || "";
+  return value.trim();
+}
+
+function promptScopeConfigFromControls(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const controls = promptScopeControls(key);
+  const stored = promptScopeStoredConfig(key);
+  const provider = controls.provider?.value || stored.promptProvider || state.config?.promptProvider || currentSettingsProvider();
+  const preset = promptProviderPreset(provider);
+  const promptModel = selectedScopePromptModel(key) || getLastPromptModel(provider) || preset.promptModel || "";
+  return compactPromptScopeConfig({
+    promptProvider: provider,
+    promptBaseUrl: promptProviderBaseUrl(provider, stored),
+    promptModel,
+    promptEndpoint: promptProviderEndpoint(provider, stored)
+  });
+}
+
+function renderPromptScopeLabel(scope = "image") {
+  const controls = promptScopeControls(scope);
+  if (!controls.label) return;
+  const config = promptConfigForScope(scope);
+  const icon = { src: iconPath(modelIconKey(config.promptModel, config.promptProvider)) };
+  const provider = promptProviderLabel(config.promptProvider || "custom");
+  controls.label.innerHTML = `<img class="model-icon model-icon-img" src="${escapeHtml(icon.src)}" alt=""><span>${escapeHtml(config.promptModel || "未选择模型")}</span><small>${escapeHtml(provider)}</small>`;
+}
+
+function renderPromptScopeControls(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const controls = promptScopeControls(key);
+  if (!controls.model || !controls.custom) return;
+  const config = promptConfigForScope(key);
+  setPromptProviderOptionsForElement(controls.provider, config.promptProvider);
+  setSelectModelOptionsForElements(controls.model, controls.custom, getProviderModelOptions(config.promptProvider), config.promptModel);
+  renderPromptScopeLabel(key);
+}
+
+function renderAllPromptScopeControls() {
+  for (const scope of PROMPT_SCOPE_KEYS) renderPromptScopeControls(scope);
+}
+
+async function persistPromptScopeSelection(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const nextScopeConfig = promptScopeConfigFromControls(key);
+  const remembered = rememberPromptModelForProvider(nextScopeConfig.promptProvider, nextScopeConfig.promptModel);
+  const promptScopeConfigs = setPromptScopeConfig(key, nextScopeConfig);
+  state.config = await window.studio.saveConfig({
+    ...state.config,
+    ...remembered,
+    promptScopeConfigs
+  });
+  renderPromptScopeControls(key);
+  updateApiState();
+}
+
+async function handlePromptScopeProviderChange(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const controls = promptScopeControls(key);
+  const provider = controls.provider?.value || state.config?.promptProvider || currentSettingsProvider();
+  const preset = promptProviderPreset(provider);
+  const selected = getLastPromptModel(provider) || preset.promptModel || "";
+  setSelectModelOptionsForElements(controls.model, controls.custom, getProviderModelOptions(provider), selected);
+  await persistPromptScopeSelection(key);
+}
+
+function syncPromptScopeModelCustomInput(scope = "image") {
+  const controls = promptScopeControls(scope);
+  const isCustom = controls.model?.value === CUSTOM_MODEL_VALUE;
+  controls.custom?.classList.toggle("hidden", !isCustom);
+  if (isCustom) {
+    controls.custom?.focus();
+    return;
+  }
+  persistPromptScopeSelection(scope);
+}
+
+function bindPromptScopeModelEvents(scope = "image") {
+  const key = normalizePromptScope(scope);
+  const controls = promptScopeControls(key);
+  controls.provider?.addEventListener("change", () => handlePromptScopeProviderChange(key));
+  controls.model?.addEventListener("change", () => syncPromptScopeModelCustomInput(key));
+  controls.custom?.addEventListener("blur", () => persistPromptScopeSelection(key));
+  controls.custom?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      persistPromptScopeSelection(key);
+    }
+  });
+  controls.test?.addEventListener("click", async () => {
+    await persistPromptScopeSelection(key);
+    await testPromptApiConnection({ scope: key, forceVisionProbe: true, source: key });
+  });
+}
+
 function syncPromptModelCustomInput() {
   const isCustom = $("#promptModel").value === CUSTOM_MODEL_VALUE;
   $("#promptModelCustom").classList.toggle("hidden", !isCustom);
@@ -3502,16 +6195,6 @@ function syncPromptProviderUi() {
   const preset = promptProviderPreset(provider);
   if ($("#promptProvider")) $("#promptProvider").value = provider;
   if ($("#promptProviderTitle")) $("#promptProviderTitle").textContent = preset.label || provider;
-  if ($("#promptBaseUrl")) $("#promptBaseUrl").value = getPromptProviderDefaultBaseUrl(provider);
-  if ($("#promptApiKey")) $("#promptApiKey").value = getSavedPromptApiKey(provider) || (state.config?.promptProvider === provider ? state.config?.promptApiKey || "" : "");
-  if ($("#promptEndpoint")) {
-    const endpoint = getPromptProviderDefaultEndpoint(provider);
-    if (![...$("#promptEndpoint").options].some((option) => option.value === endpoint)) {
-      $("#promptEndpoint").value = "chat";
-    } else {
-      $("#promptEndpoint").value = endpoint;
-    }
-  }
   const hint = $("#promptProviderHint");
   if (hint) hint.textContent = `${preset.hint || API_PROVIDER_PRESETS.custom.hint}${preset.source ? ` 来源：${preset.source}。` : ""}`;
   const button = $("#applyProviderPresetBtn");
@@ -3521,6 +6204,9 @@ function syncPromptProviderUi() {
   }
   if (els.promptProviderToggle) {
     els.promptProviderToggle.checked = promptProviderEnabled(provider);
+  }
+  if (els.promptApiSettingsBtn) {
+    els.promptApiSettingsBtn.classList.toggle("hidden", !isPromptRelayProvider(provider));
   }
   if (els.promptApiAddressPreview) {
     const base = ($("#promptBaseUrl")?.value || "").replace(/\/+$/, "");
@@ -3535,6 +6221,9 @@ function syncPromptProviderUi() {
           : endpoint === "anthropic"
             ? `预览：${base}/messages`
             : `预览：${base}/chat/completions 或 /responses`;
+    if (provider === "doubao") {
+      els.promptApiAddressPreview.textContent += "；火山方舟套餐/推理接入点请在模型名处填 ep-... 接入点 ID";
+    }
   }
   syncApiAdvancedControls(provider);
   syncProviderModelIcons();
@@ -3554,18 +6243,21 @@ function renderProviderList() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `provider-row${provider === activeProvider ? " active" : ""}`;
+    button.classList.toggle("custom-provider", Boolean(preset.custom));
     button.dataset.provider = provider;
     const enabled = promptProviderEnabled(provider);
     const initial = (preset.label || provider || "P").slice(0, 1).toUpperCase();
-    const icon = iconPath(providerIconKey(provider));
+    const providerIcon = providerIconKey(provider);
+    const icon = providerIcon ? providerIconPath(providerIcon) : "";
     button.innerHTML = `
-      <span class="provider-row-icon"><img src="${escapeHtml(icon)}" alt="" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')" /><b class="hidden">${escapeHtml(initial)}</b></span>
+      <span class="provider-row-icon">${icon ? `<img src="${escapeHtml(icon)}" alt="" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')" />` : ""}<b class="${icon ? "hidden" : ""}">${escapeHtml(initial)}</b></span>
       <span class="provider-row-main">
         <strong>${escapeHtml(preset.label || provider)}</strong>
       </span>
       ${enabled ? '<span class="provider-on">ON</span>' : ""}
     `;
     button.addEventListener("click", () => selectPromptProvider(provider));
+    button.addEventListener("contextmenu", (event) => openProviderContextMenu(event, provider));
     els.providerList.appendChild(button);
   }
 }
@@ -3622,13 +6314,17 @@ function selectPromptProvider(provider) {
   if ($("#promptProvider")) $("#promptProvider").value = state.selectedPromptProvider;
   const preset = promptProviderPreset(state.selectedPromptProvider);
   const lastModel = getLastPromptModel(state.selectedPromptProvider) || (state.config?.promptProvider === state.selectedPromptProvider ? state.config?.promptModel : "") || preset.promptModel || "";
-  $("#promptBaseUrl").value = getPromptProviderDefaultBaseUrl(state.selectedPromptProvider);
-  $("#promptEndpoint").value = getPromptProviderDefaultEndpoint(state.selectedPromptProvider);
-  $("#promptApiKey").value = getSavedPromptApiKey(state.selectedPromptProvider) || (state.config?.promptProvider === state.selectedPromptProvider ? state.config?.promptApiKey || "" : "");
+  const baseInput = $("#promptBaseUrl");
+  if (baseInput) baseInput.value = getPromptProviderDefaultBaseUrl(state.selectedPromptProvider);
+  const endpointInput = $("#promptEndpoint");
+  if (endpointInput) endpointInput.value = getPromptProviderDefaultEndpoint(state.selectedPromptProvider);
+  const keyInput = $("#promptApiKey");
+  if (keyInput) keyInput.value = getSavedPromptApiKey(state.selectedPromptProvider) || (state.config?.promptProvider === state.selectedPromptProvider ? state.config?.promptApiKey || "" : "");
   setPromptModelOptions(getProviderModelOptions(state.selectedPromptProvider), lastModel, false);
   renderProviderList();
   renderPromptModelList(state.selectedPromptProvider);
   syncPromptProviderUi();
+  renderMainPromptModelSelect(state.config?.promptModel || lastModel);
 }
 
 function selectPromptModel(provider, model) {
@@ -3636,6 +6332,7 @@ function selectPromptModel(provider, model) {
   rememberPromptModelForProvider(provider, model);
   renderPromptModelList(provider);
   syncPromptProviderUi();
+  renderPlanningModelLabel();
 }
 
 function removePromptModel(provider, model) {
@@ -3645,8 +6342,17 @@ function removePromptModel(provider, model) {
   setPromptModelOptions(getProviderModelOptions(provider), getSelectedPromptModel(), false);
 }
 
+function addProviderModel(provider, model) {
+  const modelName = String(model || "").trim();
+  if (!modelName) return {};
+  const promptProviderModels = { ...getPromptProviderModels() };
+  promptProviderModels[provider] = uniqueModelOptions([modelName, ...(promptProviderModels[provider] || [])]).slice(0, 200);
+  state.config = { ...(state.config || {}), promptProviderModels };
+  return promptProviderModels;
+}
+
 function syncApiAdvancedControls(provider = currentSettingsProvider()) {
-  const options = { ...API_OPTION_DEFAULTS, ...(getPromptProviderApiOptions()[provider] || {}) };
+  const options = { ...apiOptionDefaultsForProvider(provider), ...(getPromptProviderApiOptions()[provider] || {}) };
   $$("#apiAdvancedModal [data-api-option]").forEach((input) => {
     input.checked = Boolean(options[input.dataset.apiOption]);
   });
@@ -3654,7 +6360,7 @@ function syncApiAdvancedControls(provider = currentSettingsProvider()) {
 
 function collectApiAdvancedOptions(provider = currentSettingsProvider()) {
   const current = { ...getPromptProviderApiOptions() };
-  current[provider] = { ...API_OPTION_DEFAULTS };
+  current[provider] = { ...apiOptionDefaultsForProvider(provider) };
   $$("#apiAdvancedModal [data-api-option]").forEach((input) => {
     current[provider][input.dataset.apiOption] = Boolean(input.checked);
   });
@@ -3663,48 +6369,188 @@ function collectApiAdvancedOptions(provider = currentSettingsProvider()) {
 }
 
 function openApiAdvancedModal() {
+  if (!isPromptRelayProvider(currentSettingsProvider())) return;
   syncApiAdvancedControls(currentSettingsProvider());
-  els.apiAdvancedModal?.classList.remove("hidden");
+  showOverlay(els.apiAdvancedModal);
 }
 
 function closeApiAdvancedModal() {
   collectApiAdvancedOptions(currentSettingsProvider());
-  els.apiAdvancedModal?.classList.add("hidden");
+  hideOverlay(els.apiAdvancedModal);
 }
 
-function openProviderAddModal() {
-  if (els.providerNameInput) els.providerNameInput.value = "";
-  if (els.providerTypeSelect) els.providerTypeSelect.value = "openai";
-  els.providerAddModal?.classList.remove("hidden");
+function openProviderAddModal(provider = "") {
+  const editingProvider = String(provider || "").trim();
+  const preset = editingProvider ? promptProviderPreset(editingProvider) : null;
+  if (els.providerAddModal) {
+    els.providerAddModal.dataset.editingProvider = editingProvider;
+  }
+  if (els.providerAddTitle) els.providerAddTitle.textContent = editingProvider ? "编辑供应商" : "添加供应商";
+  if (els.providerNameInput) els.providerNameInput.value = editingProvider ? (preset?.label || editingProvider) : "";
+  if (els.providerTypeSelect) els.providerTypeSelect.value = editingProvider ? (preset?.type || "openai") : "openai";
+  showOverlay(els.providerAddModal);
   els.providerNameInput?.focus();
 }
 
 async function confirmProviderAdd() {
+  const originalProvider = els.providerAddModal?.dataset.editingProvider || "";
   const name = String(els.providerNameInput?.value || "").trim();
   if (!name) {
     toast("请先填写供应商名称。", "error");
     return;
   }
-  const provider = normalizeProviderKey(name);
-  const meta = {
-    ...getPromptProviderMeta(),
-    [provider]: {
-      name,
-      type: els.providerTypeSelect?.value || "openai",
-      promptEndpoint: providerTypeToEndpoint(els.providerTypeSelect?.value),
-      custom: true
-    }
+  const providerType = els.providerTypeSelect?.value || "openai";
+  const nextProvider = originalProvider || normalizeProviderKey(name);
+  const meta = { ...getPromptProviderMeta() };
+  meta[nextProvider] = {
+    ...(meta[nextProvider] || {}),
+    name,
+    type: providerType,
+    promptEndpoint: providerTypeToEndpoint(providerType),
+    category: "custom",
+    custom: true
   };
-  const providerModels = { ...getPromptProviderModels(), [provider]: [] };
+  const providerModels = { ...getPromptProviderModels() };
+  if (!providerModels[nextProvider]) providerModels[nextProvider] = [];
+  const providerLastModels = { ...getPromptProviderLastModels() };
+  const providerKeys = { ...getPromptProviderKeys() };
+  const providerApiOptions = { ...getPromptProviderApiOptions() };
+  const providerCapabilities = { ...getPromptModelCapabilitiesMap() };
+  const isEditingActiveProvider = Boolean(originalProvider && state.config?.promptProvider === originalProvider);
   state.config = await window.studio.saveConfig({
     ...state.config,
+    promptProvider: isEditingActiveProvider ? nextProvider : state.config?.promptProvider,
+    promptEndpoint: isEditingActiveProvider ? providerTypeToEndpoint(providerType) : state.config?.promptEndpoint,
     promptProviderMeta: meta,
-    promptProviderModels: providerModels
+    promptProviderModels: providerModels,
+    promptProviderLastModels: providerLastModels,
+    promptProviderKeys: providerKeys,
+    promptProviderApiOptions: providerApiOptions,
+    promptModelCapabilities: providerCapabilities
   });
+  const provider = nextProvider;
   state.selectedPromptProvider = provider;
   els.providerAddModal?.classList.add("hidden");
+  if (els.providerAddModal) els.providerAddModal.dataset.editingProvider = "";
   renderProviderList();
   selectPromptProvider(provider);
+}
+
+function openProviderContextMenu(event, provider) {
+  event.preventDefault();
+  if (!els.providerContextMenu) return;
+  selectPromptProvider(provider);
+  els.providerContextMenu.dataset.provider = provider;
+  const isCustom = Boolean(promptProviderPreset(provider).custom);
+  els.providerContextMenu.querySelector('[data-provider-action="edit"]')?.toggleAttribute("disabled", !isCustom);
+  els.providerContextMenu.querySelector('[data-provider-action="delete"]')?.toggleAttribute("disabled", !isCustom);
+  els.providerContextMenu.classList.remove("hidden");
+  const rect = els.providerContextMenu.getBoundingClientRect();
+  const x = Math.min(event.clientX, window.innerWidth - rect.width - 12);
+  const y = Math.min(event.clientY, window.innerHeight - rect.height - 12);
+  els.providerContextMenu.style.left = `${Math.max(12, x)}px`;
+  els.providerContextMenu.style.top = `${Math.max(12, y)}px`;
+}
+
+function closeProviderContextMenu() {
+  els.providerContextMenu?.classList.add("hidden");
+}
+
+function openProviderNoteModal(provider) {
+  if (!provider || !els.providerNoteModal) return;
+  const preset = promptProviderPreset(provider);
+  els.providerNoteModal.dataset.provider = provider;
+  if (els.providerNoteTitle) {
+    els.providerNoteTitle.textContent = `${preset.label || provider} 的本地备注，只保存在当前软件配置里。`;
+  }
+  if (els.providerNoteInput) {
+    els.providerNoteInput.value = getPromptProviderNotes()[provider] || "";
+  }
+  showOverlay(els.providerNoteModal);
+  els.providerNoteInput?.focus();
+}
+
+function closeProviderNoteModal() {
+  if (els.providerNoteModal) els.providerNoteModal.dataset.provider = "";
+  hideOverlay(els.providerNoteModal);
+}
+
+async function saveProviderNote() {
+  const provider = els.providerNoteModal?.dataset.provider || "";
+  if (!provider) return;
+  const promptProviderNotes = { ...getPromptProviderNotes() };
+  const note = String(els.providerNoteInput?.value || "").trim();
+  if (note) {
+    promptProviderNotes[provider] = note;
+  } else {
+    delete promptProviderNotes[provider];
+  }
+  state.config = await window.studio.saveConfig({
+    ...state.config,
+    promptProviderNotes
+  });
+  closeProviderNoteModal();
+  renderProviderList();
+  syncPromptProviderUi();
+  toast("模型备注已保存");
+}
+
+async function deletePromptProvider(provider) {
+  if (!provider || !promptProviderPreset(provider).custom) {
+    showMessageModal("内置供应商不能删除，只能删除你手动添加的自定义供应商。", "无法删除供应商", "error");
+    return;
+  }
+  const ok = window.confirm(`确定删除供应商「${promptProviderLabel(provider)}」吗？这会移除它的 API Key、模型列表和能力标记。`);
+  if (!ok) return;
+  const meta = { ...getPromptProviderMeta() };
+  const providerModels = { ...getPromptProviderModels() };
+  const providerLastModels = { ...getPromptProviderLastModels() };
+  const providerKeys = { ...getPromptProviderKeys() };
+  const providerApiOptions = { ...getPromptProviderApiOptions() };
+  const providerCapabilities = { ...getPromptModelCapabilitiesMap() };
+  const providerNotes = { ...getPromptProviderNotes() };
+  delete meta[provider];
+  delete providerModels[provider];
+  delete providerLastModels[provider];
+  delete providerKeys[provider];
+  delete providerApiOptions[provider];
+  delete providerCapabilities[provider];
+  delete providerNotes[provider];
+  const fallbackProvider = state.config?.promptProvider === provider ? "grsai-gemini" : state.config?.promptProvider;
+  state.config = await window.studio.saveConfig({
+    ...state.config,
+    promptProvider: fallbackProvider,
+    promptProviderMeta: meta,
+    promptProviderModels: providerModels,
+    promptProviderLastModels: providerLastModels,
+    promptProviderKeys: providerKeys,
+    promptProviderApiOptions: providerApiOptions,
+    promptModelCapabilities: providerCapabilities,
+    promptProviderNotes: providerNotes
+  });
+  state.selectedPromptProvider = fallbackProvider || "grsai-gemini";
+  closeProviderContextMenu();
+  renderProviderList();
+  selectPromptProvider(state.selectedPromptProvider);
+}
+
+function handleProviderContextAction(action, provider) {
+  closeProviderContextMenu();
+  if (action === "edit") {
+    if (!promptProviderPreset(provider).custom) {
+      showMessageModal("内置供应商已经按官方接口预设好，不能改成其他类型。需要第三方中转或特殊地址时，请点击 + 添加一个自定义供应商。", "无法编辑内置供应商", "info");
+      return;
+    }
+    openProviderAddModal(provider);
+    return;
+  }
+  if (action === "delete") {
+    deletePromptProvider(provider);
+    return;
+  }
+  if (action === "note") {
+    openProviderNoteModal(provider);
+  }
 }
 
 function openModelEditModal(provider, model = "") {
@@ -3719,7 +6565,7 @@ function openModelEditModal(provider, model = "") {
   $$("#modelEditModal [data-model-capability]").forEach((input) => {
     input.checked = Boolean(caps[input.dataset.modelCapability]);
   });
-  els.modelEditModal.classList.remove("hidden");
+  showOverlay(els.modelEditModal);
   els.modelEditId?.focus();
 }
 
@@ -3743,12 +6589,14 @@ async function saveModelEdit() {
   const promptModelCapabilities = setModelCapabilities(provider, model, caps);
   state.config = await window.studio.saveConfig({
     ...state.config,
+    promptModel: state.config?.promptModel === originalModel ? model : state.config?.promptModel,
     promptProviderModels,
     promptModelCapabilities
   });
   setPromptModelOptions(getProviderModelOptions(provider), model, false);
   els.modelEditModal?.classList.add("hidden");
   renderPromptModelList(provider);
+  renderPlanningModelLabel();
 }
 
 function applyPromptProviderPreset(provider, options = {}) {
@@ -3774,9 +6622,9 @@ function handlePromptProviderChange(provider) {
   syncPromptApiKeyForProvider(provider);
   syncPromptProviderUi();
   if (preset.custom) {
-    $("#promptBaseUrl").value = "";
+    $("#promptBaseUrl").value = preset.promptBaseUrl || "";
     $("#promptEndpoint").value = preset.promptEndpoint || "chat";
-    setPromptModelOptions(getProviderModelOptions(provider), getLastPromptModel(provider), false);
+    setPromptModelOptions(getProviderModelOptions(provider), getLastPromptModel(provider) || preset.promptModel || "", false);
     $("#promptApiActionStatus").textContent = "已切换为自定义供应商，请手动填写 API 地址、接口类型和模型。";
     renderProviderList();
     renderPromptModelList(provider);
@@ -3799,6 +6647,10 @@ function ensureDefaultGrsaiGeminiConfig(config = {}) {
     next.promptEndpoint = "chat";
   }
   if (!next.imageModelRoute) next.imageModelRoute = "auto";
+  next.featureImageModelRoutes = {
+    aplus: "auto",
+    ...(next.featureImageModelRoutes && typeof next.featureImageModelRoutes === "object" ? next.featureImageModelRoutes : {})
+  };
   if (!next.image2kModel || next.image2kModel === "nano-banana-2") {
     next.image2kModel = "gpt-image-2-vip";
     next.grsai2kModel = "gpt-image-2-vip";
@@ -3827,7 +6679,7 @@ function collectImageApiSettings() {
   return {
     imageProvider: provider,
     imageProviderType: isPresetProvider && preset.providerType ? preset.providerType : ($("#imageProviderType").value || "custom"),
-    imageBaseUrl: isPresetProvider && Object.prototype.hasOwnProperty.call(preset, "baseUrl") ? preset.baseUrl : $("#grsaiBaseUrl").value.trim(),
+    imageBaseUrl: $("#grsaiBaseUrl").value.trim() || (isPresetProvider && Object.prototype.hasOwnProperty.call(preset, "baseUrl") ? preset.baseUrl : ""),
     imageApiKey: $("#grsaiApiKey").value.trim(),
     imageModelRoute: normalizeImageModelRoute($("#modelRoute")?.value || state.imageModelRoute),
     image1kModel,
@@ -3842,6 +6694,26 @@ async function rememberCurrentPromptModel() {
   const remembered = rememberPromptModelForProvider(provider, promptModel);
   await persistPromptProviderMemory(provider, remembered);
   setPromptModelOptions(getProviderModelOptions(provider), promptModel, false);
+}
+
+async function applyMainPromptModelSelection() {
+  const provider = state.config?.promptProvider || currentSettingsProvider();
+  const promptModel = getSelectedMainPromptModel();
+  if (!promptModel) return;
+  const remembered = rememberPromptModelForProvider(provider, promptModel);
+  state.selectedPromptProvider = provider;
+  state.config = await window.studio.saveConfig({
+    ...state.config,
+    promptProvider: provider,
+    promptModel,
+    ...remembered
+  });
+  if (provider === currentSettingsProvider()) {
+    setPromptModelOptions(getProviderModelOptions(provider), promptModel, false);
+    renderPromptModelList(provider);
+  }
+  updateApiState();
+  renderPlanningModelLabel();
 }
 
 async function saveSettings() {
@@ -3880,6 +6752,7 @@ async function saveSettings() {
     promptProviderMeta,
     promptProviderApiOptions,
     promptModelCapabilities: getPromptModelCapabilitiesMap(),
+    promptScopeConfigs: getPromptScopeConfigs(),
     promptEndpoint: promptSettings.promptEndpoint,
     trendProxyUrl: $("#trendProxyUrl").value.trim(),
     imageProvider,
@@ -3896,12 +6769,15 @@ async function saveSettings() {
     grsaiApiKey: imageApiKey,
     grsai1kModel: image1kModel || "gpt-image-2",
     grsai2kModel: image2kModel || "gpt-image-2-vip",
-    grsaiConcurrency: Math.max(1, Math.min(12, Number($("#grsaiConcurrency").value || 6)))
+    grsaiConcurrency: Math.max(1, Math.min(10, Number($("#grsaiConcurrency").value || 6))),
+    updateManifestUrl: String(els.updateManifestUrl?.value || "").trim(),
+    updateCheckOnStartup: els.updateCheckOnStartup ? els.updateCheckOnStartup.checked : true
   };
 
   state.config = await window.studio.saveConfig({ ...state.config, ...next });
   state.imageModelRoute = imageModelRoute;
   populateModelRouteSelect();
+  populateAiImageModelSelect();
   syncImageModelRouteUi();
   updateApiState();
   els.settingsDrawer.classList.add("hidden");
@@ -3959,6 +6835,7 @@ async function saveCurrentImageApiKey() {
   state.config.imageApiKey = imageApiKey;
   state.config.grsaiApiKey = imageApiKey;
   syncImageApiKeyForProvider(provider);
+  populateAiImageModelSelect();
   const preset = IMAGE_PROVIDER_PRESETS[provider] || IMAGE_PROVIDER_PRESETS.custom;
   toast(`${preset.label} 的作图 API Key 已保存到本机。`);
 }
@@ -3985,35 +6862,88 @@ async function rememberCurrentImageModels() {
   state.config.image1kModel = image1kModel || "gpt-image-2";
   state.config.image2kModel = image2kModel || "gpt-image-2-vip";
   syncImageModelOptions(provider, image1kModel, image2kModel);
+  populateAiImageModelSelect();
 }
 
-async function testPromptApiConnection() {
-  const settings = collectPromptApiSettings();
+async function testPromptApiConnection(options = {}) {
+  const scope = options.scope ? normalizePromptScope(options.scope) : "";
+  const baseSettings = scope
+    ? promptConfigWithApiKey(promptConfigForScope(scope))
+    : options.useSavedConfig
+    ? {
+      promptProvider: state.config?.promptProvider || currentSettingsProvider(),
+      promptBaseUrl: state.config?.promptBaseUrl || "",
+      promptApiKey: state.config?.promptApiKey || getSavedPromptApiKey(state.config?.promptProvider || currentSettingsProvider()),
+      promptModel: state.config?.promptModel || "",
+      promptEndpoint: state.config?.promptEndpoint || "chat"
+    }
+    : collectPromptApiSettings();
+  const chosenModel = options.modelOverride
+    ? String(options.modelOverride).trim()
+    : await openPromptTestModelDialog(baseSettings, {
+      selectedModel: baseSettings.promptModel,
+      forceVisionProbe: Boolean(options.forceVisionProbe)
+    });
+  if (!chosenModel) return;
+  const settings = {
+    ...baseSettings,
+    promptModel: chosenModel,
+    forceVisionProbe: Boolean(options.forceVisionProbe)
+  };
   if (!settings.promptBaseUrl || !settings.promptApiKey || !settings.promptModel) {
     showMessageModal("请先填写 API 地址、API Key 和模型名，再检测连接。", "无法检测 API", "error");
     return;
   }
 
-  const button = $("#testPromptApiBtn");
-  const status = $("#promptApiActionStatus");
-  button.disabled = true;
-  if (status) status.textContent = "正在检测连接，请稍后...";
+  const button = options.source === "main"
+    ? els.mainPromptModelTestBtn
+    : options.source === "aplus"
+      ? els.aplusPromptModelTestBtn
+      : $("#testPromptApiBtn");
+  const status = scope === "aplus" ? els.aplusAiInlineStatus : $("#promptApiActionStatus");
+  if (button) button.disabled = true;
+  if (status) {
+    status.textContent = `正在检测模型 ${settings.promptModel}，请稍后...`;
+    status.classList?.remove?.("hidden", "success", "failed");
+    status.classList?.add?.("active");
+  }
   try {
     const result = await window.studio.testPromptApi(settings);
     const remembered = rememberPromptModelForProvider(settings.promptProvider, settings.promptModel);
+    const promptModelCapabilities = setModelCapabilities(
+      settings.promptProvider,
+      settings.promptModel,
+      result?.visionOk
+        ? { ...modelCapabilities(settings.promptProvider, settings.promptModel), vision: true }
+        : modelCapabilities(settings.promptProvider, settings.promptModel)
+    );
+    const nextPromptScopeConfigs = scope
+      ? setPromptScopeConfig(scope, {
+          promptProvider: settings.promptProvider,
+          promptBaseUrl: settings.promptBaseUrl,
+          promptModel: settings.promptModel,
+          promptEndpoint: settings.promptEndpoint
+        })
+      : getPromptScopeConfigs();
     state.config = await window.studio.saveConfig({
       ...state.config,
-      promptProvider: settings.promptProvider,
-      promptBaseUrl: settings.promptBaseUrl,
-      promptApiKey: settings.promptApiKey,
+      promptProvider: scope ? state.config?.promptProvider : settings.promptProvider,
+      promptBaseUrl: scope ? state.config?.promptBaseUrl : settings.promptBaseUrl,
+      promptApiKey: scope ? state.config?.promptApiKey : settings.promptApiKey,
       promptProviderKeys: setPromptApiKeyForProvider(settings.promptProvider, settings.promptApiKey),
-      promptModel: settings.promptModel,
-      promptEndpoint: settings.promptEndpoint,
+      promptModel: scope ? state.config?.promptModel : settings.promptModel,
+      promptEndpoint: scope ? state.config?.promptEndpoint : settings.promptEndpoint,
       promptProviderApiOptions: collectApiAdvancedOptions(settings.promptProvider),
-      promptModelCapabilities: getPromptModelCapabilitiesMap(),
+      promptModelCapabilities,
+      promptScopeConfigs: nextPromptScopeConfigs,
       ...remembered
     });
+    const modelOptions = getProviderModelOptions(settings.promptProvider);
+    if (!modelOptions.includes(settings.promptModel)) {
+      addProviderModel(settings.promptProvider, settings.promptModel);
+    }
     setPromptModelOptions(getProviderModelOptions(settings.promptProvider), settings.promptModel, false);
+    if ($("#promptModel")) $("#promptModel").value = settings.promptModel;
     renderProviderList();
     renderPromptModelList(settings.promptProvider);
     updateApiState();
@@ -4021,14 +6951,24 @@ async function testPromptApiConnection() {
     const modelText = result?.model ? `\n当前测试模型：${result.model}` : "";
     const requestText = result?.requestUrl ? `\n本次检测请求地址：${result.requestUrl}` : "";
     const endpointText = result?.endpoint ? `\n接口类型：${result.endpoint}` : "";
-    showMessageModal(`恭喜，API已成功连接，并已保存为当前 AI 分析模型。${modelText}${endpointText}${requestText}`, "连接成功", "success");
-    if (status) status.textContent = "连接检测成功，已保存为当前 AI 分析配置。";
+    const noteText = result?.note ? `\n检测方式：${result.note}` : "";
+    showMessageModal(`恭喜，API已成功连接，并已保存为当前提示词/识图模型。${modelText}${endpointText}${requestText}${noteText}`, "连接成功", "success");
+    if (status) {
+      status.textContent = result?.visionOk ? "连接检测成功，文本 JSON 和视觉输入都可用。" : "连接检测成功，文本 JSON 可用。";
+      status.classList?.remove?.("active", "failed");
+      status.classList?.add?.("success");
+    }
   } catch (error) {
     const message = humanizeErrorMessage(error);
     showMessageModal(message || "API 检测失败，请检查配置。", "连接失败", "error");
-    if (status) status.textContent = "连接检测失败，请查看弹窗说明。";
+    if (status) {
+      status.textContent = "连接检测失败，请查看弹窗说明。";
+      status.classList?.remove?.("active", "success");
+      status.classList?.add?.("failed");
+      status.classList?.remove?.("hidden");
+    }
   } finally {
-    button.disabled = false;
+    if (button) button.disabled = false;
   }
 }
 
@@ -4077,8 +7017,9 @@ async function fetchPromptModels() {
     renderProviderList();
     renderPromptModelList(provider);
     const shown = models.slice(0, 24).join("\n");
-    showMessageModal(`已获取 ${models.length} 个模型。\n\n${shown}${models.length > 24 ? "\n..." : ""}`, "模型列表", "success");
-    if (status) status.textContent = `已获取 ${models.length} 个模型，可直接在下拉框选择。`;
+    const noteText = result?.note ? `\n\n说明：${result.note}` : "";
+    showMessageModal(`已获取 ${models.length} 个模型。\n\n${shown}${models.length > 24 ? "\n..." : ""}${noteText}`, "模型列表", "success");
+    if (status) status.textContent = result?.note ? `已获取 ${models.length} 个模型；请留意弹窗里的供应商说明。` : `已获取 ${models.length} 个模型，可直接在下拉框选择。`;
   } catch (error) {
     const message = humanizeErrorMessage(error);
     showMessageModal(message || "获取模型列表失败，请检查 API 配置。", "获取失败", "error");
@@ -4165,6 +7106,8 @@ async function fetchImageModels() {
     const provider = settings.imageProvider || "grsai";
     const selected1k = settings.image1kModel || models[0];
     const selected2k = settings.image2kModel || selected1k;
+    const selectedRoute = normalizeImageModelRoute(settings.imageModelRoute || state.ai.imageModelRoute);
+    const selectedAiRoute = selectedRoute !== "auto" ? selectedRoute : (state.ai.imageModelRoute && state.ai.imageModelRoute !== "auto" ? state.ai.imageModelRoute : selected1k);
     const imageProviderModels = {
       ...getImageProviderModels(),
       [provider]: models
@@ -4172,7 +7115,8 @@ async function fetchImageModels() {
     const imageProviderLastModels = {
       ...getImageProviderLastModels(),
       [`${provider}:1k`]: selected1k,
-      [`${provider}:2k`]: selected2k
+      [`${provider}:2k`]: selected2k,
+      [`${provider}:route`]: selectedAiRoute
     };
     state.config = await window.studio.saveConfig({
       ...state.config,
@@ -4192,7 +7136,9 @@ async function fetchImageModels() {
       imageProviderLastModels
     });
     state.imageModelRoute = normalizeImageModelRoute(settings.imageModelRoute);
+    state.ai.imageModelRoute = selectedAiRoute;
     syncImageModelOptions(provider, selected1k, selected2k);
+    populateAiImageModelSelect();
     const shown = models.slice(0, 24).join("\n");
     showMessageModal(`已获取 ${models.length} 个作图模型。\n\n${shown}${models.length > 24 ? "\n..." : ""}${result?.note ? `\n\n${result.note}` : ""}`, "作图模型列表", "success");
     if (status) status.textContent = `已获取 ${models.length} 个作图模型，可直接在下拉框选择。`;
@@ -4206,9 +7152,24 @@ async function fetchImageModels() {
 }
 
 function bindEvents() {
+  window.addEventListener("error", (event) => {
+    logClientEvent("renderer-window-error", {
+      message: event.message || "",
+      source: event.filename || "",
+      line: event.lineno || 0,
+      column: event.colno || 0
+    });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    logClientEvent("renderer-unhandled-rejection", {
+      reason: shortErrorMessage(event.reason || event)
+    });
+  });
+
   els.fileInput.addEventListener("change", (event) => addFiles(event.target.files));
   els.titleFileInput.addEventListener("change", (event) => addFiles(event.target.files));
   els.cutoutFileInput.addEventListener("change", (event) => handleCutoutImageFiles(event.target.files));
+  els.aplusFileInput?.addEventListener("change", (event) => addFiles(event.target.files, "aplus"));
 
   els.sideNavItems.forEach((button) => {
     button.addEventListener("click", () => setRoute(button.dataset.route));
@@ -4265,19 +7226,39 @@ function bindEvents() {
 
   els.cutoutDropzone.addEventListener("drop", handleCutoutImageDrop);
 
+  for (const dropzone of [els.aplusDropzone].filter(Boolean)) {
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        dropzone.classList.add("dragging");
+      });
+    });
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropzone.classList.remove("dragging");
+      });
+    });
+  }
+
+  els.aplusDropzone?.addEventListener("drop", handleAplusProductImageDrop);
+
   els.productName?.addEventListener("input", () => {
     updateProductInfoCharCount();
     markProductFactsEdited();
   });
-  els.productInfo.addEventListener("input", () => {
+  els.productInfo?.addEventListener("input", () => {
     updateProductInfoCharCount();
     markProductFactsEdited();
   });
   bindPackageModeTabs();
   syncProductModeUi();
 
-  els.analyzeBtn.addEventListener("click", analyze);
+  els.analyzeBtn?.addEventListener("click", analyze);
   els.generateBtn.addEventListener("click", generate);
+  els.aplusAnalyzeBtn?.addEventListener("click", analyzeAplusProduct);
+  els.aplusGenerateBtn?.addEventListener("click", generateAplusPage);
   els.titleGenerateBtn.addEventListener("click", generateTitle);
   els.copyTitleBtn.addEventListener("click", copyTitleToClipboard);
   els.cutoutActionBtn.addEventListener("click", (event) => {
@@ -4338,16 +7319,149 @@ function bindEvents() {
     state.aPlusSize = els.aPlusSize.value;
   });
 
+  els.aiModeGroup?.querySelectorAll("button").forEach((button) => {
+    button.addEventListener("click", () => setAiMode(button.dataset.value));
+  });
+  els.aiImageModelSelect?.addEventListener("change", async () => {
+    const isCustom = els.aiImageModelSelect.value === CUSTOM_MODEL_VALUE;
+    els.aiImageModelCustom?.classList.toggle("hidden", !isCustom);
+    if (isCustom) {
+      els.aiImageModelCustom?.focus();
+      return;
+    }
+    await persistAiImageModelSelection();
+  });
+  els.aiImageModelCustom?.addEventListener("blur", persistAiImageModelSelection);
+  els.aiImageModelCustom?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    persistAiImageModelSelection();
+  });
+  els.aiFileInput?.addEventListener("change", async () => {
+    await addAiImages(els.aiFileInput.files || []);
+    els.aiFileInput.value = "";
+  });
+  els.aiDocumentInput?.addEventListener("change", async () => {
+    await addAiDocuments(els.aiDocumentInput.files || []);
+    els.aiDocumentInput.value = "";
+  });
+  els.aiDropzone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    els.aiDropzone.classList.add("dragging");
+  });
+  els.aiDropzone?.addEventListener("dragleave", () => els.aiDropzone.classList.remove("dragging"));
+  els.aiDropzone?.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    els.aiDropzone.classList.remove("dragging");
+    await addAiImages(event.dataTransfer?.files || []);
+  });
+  els.aiDocumentDropzone?.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    els.aiDocumentDropzone.classList.add("dragging");
+  });
+  els.aiDocumentDropzone?.addEventListener("dragleave", () => els.aiDocumentDropzone.classList.remove("dragging"));
+  els.aiDocumentDropzone?.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    els.aiDocumentDropzone.classList.remove("dragging");
+    await addAiDocuments(event.dataTransfer?.files || []);
+  });
+  els.aiSendBtn?.addEventListener("click", sendAiWorkspaceMessage);
+  els.aiClearBtn?.addEventListener("click", clearAiWorkspace);
+  els.aiNewChatBtn?.addEventListener("click", clearAiWorkspace);
+  els.aiMessageInput?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+    event.preventDefault();
+    if (!els.aiSendBtn?.disabled) sendAiWorkspaceMessage();
+  });
+  els.aiMessageInput?.addEventListener("paste", handleAiPaste);
+  document.addEventListener("paste", (event) => {
+    if (event.target === els.aiMessageInput) return;
+    handleAiPaste(event);
+  });
+  $$(".ai-sidebar-nav [data-ai-preset]").forEach((button) => {
+    button.addEventListener("click", () => fillAiWorkspacePrompt(button.dataset.aiPreset || ""));
+  });
+  $$(".ai-suggestion-row button").forEach((button) => {
+    button.addEventListener("click", () => {
+      const text = button.textContent.trim();
+      if (/修改|修图/.test(text)) fillAiWorkspacePrompt("image");
+      else if (/使用/.test(text)) fillAiWorkspacePrompt("usage");
+      else fillAiWorkspacePrompt("analyze");
+    });
+  });
+
+  [
+    els.unitOfSaleInput,
+    els.bundleComponentsInput,
+    els.componentDifferencesInput,
+    els.pcsCountInput,
+    els.packArrangementInput,
+    els.usageNotesInput
+  ].forEach((input) => {
+    input?.addEventListener("input", () => {
+      markProductFactsEdited();
+      updateProductInfoCharCount();
+    });
+  });
+
+  els.aplusModuleGrid?.querySelectorAll("[data-aplus-module]").forEach((input) => {
+    input.addEventListener("change", () => {
+      syncAplusModuleCard(input);
+      syncAplusSelectAllButton();
+    });
+  });
+  els.aplusSelectAllModulesBtn?.addEventListener("click", () => {
+    const inputs = $$("[data-aplus-module]");
+    const shouldSelect = !inputs.every((input) => input.checked);
+    inputs.forEach((input) => {
+      input.checked = shouldSelect;
+      syncAplusModuleCard(input);
+    });
+    syncAplusSelectAllButton();
+  });
+
+  els.aplusProductName?.addEventListener("input", () => { state.aplus.productName = els.aplusProductName.value; });
+  els.aplusProductInfo?.addEventListener("input", () => { state.aplus.productInfo = els.aplusProductInfo.value; });
+  els.aplusFormat?.addEventListener("change", () => { state.aplus.format = els.aplusFormat.value; });
+
   bindChoiceGroup("#resolutionGroup", "resolution");
   bindChoiceGroup("#ratioGroup", "ratio");
 
   $("#openBrandBtn").addEventListener("click", openBrandDrawer);
   $("#closeBrandBtn").addEventListener("click", () => els.brandDrawer.classList.add("hidden"));
   $("#saveBrandBtn").addEventListener("click", saveBrand);
+  els.mainPromptProviderSelect?.addEventListener("change", () => handlePromptScopeProviderChange("image"));
+  els.mainPromptModelSelect?.addEventListener("change", () => syncPromptScopeModelCustomInput("image"));
+  els.mainPromptModelCustom?.addEventListener("blur", () => persistPromptScopeSelection("image"));
+  els.mainPromptModelCustom?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      persistPromptScopeSelection("image");
+    }
+  });
+  els.mainPromptModelTestBtn?.addEventListener("click", async () => {
+    await persistPromptScopeSelection("image");
+    await testPromptApiConnection({ scope: "image", forceVisionProbe: true, source: "main" });
+  });
+  bindPromptScopeModelEvents("aplus");
+  bindPromptScopeModelEvents("ai");
 
   $("#openSettingsBtn").addEventListener("click", openSettingsDrawer);
+  els.aiOpenSettingsBtn?.addEventListener("click", openSettingsDrawer);
   $("#closeSettingsBtn").addEventListener("click", () => els.settingsDrawer.classList.add("hidden"));
   $("#saveSettingsBtn").addEventListener("click", saveSettings);
+  els.checkUpdateBtn?.addEventListener("click", () => checkForUpdates({ manual: true }));
+  els.updateCloseX?.addEventListener("click", closeUpdateModal);
+  els.updateLaterBtn?.addEventListener("click", remindUpdateLater);
+  els.updateNotesBtn?.addEventListener("click", () => {
+    openUpdateNotes().catch((error) => toast(shortErrorMessage(error), "error"));
+  });
+  els.updateDownloadBtn?.addEventListener("click", () => {
+    openUpdateDownload().catch((error) => toast(shortErrorMessage(error), "error"));
+  });
+  els.updateModal?.addEventListener("click", (event) => {
+    if (event.target === els.updateModal) closeUpdateModal();
+  });
   $("#promptProvider")?.addEventListener("change", (event) => {
     handlePromptProviderChange(event.currentTarget.value);
   });
@@ -4362,7 +7476,16 @@ function bindEvents() {
   });
   $("#savePromptApiKeyBtn").addEventListener("click", saveCurrentPromptApiKey);
   els.providerSearch?.addEventListener("input", renderProviderList);
-  els.addProviderBtn?.addEventListener("click", openProviderAddModal);
+  els.addProviderBtn?.addEventListener("click", () => openProviderAddModal());
+  els.providerContextMenu?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-provider-action]");
+    if (!button) return;
+    handleProviderContextAction(button.dataset.providerAction, els.providerContextMenu.dataset.provider);
+  });
+  document.addEventListener("click", (event) => {
+    if (!els.providerContextMenu || els.providerContextMenu.classList.contains("hidden")) return;
+    if (!els.providerContextMenu.contains(event.target)) closeProviderContextMenu();
+  });
   els.promptApiSettingsBtn?.addEventListener("click", openApiAdvancedModal);
   els.promptProviderToggle?.addEventListener("change", () => {
     if (!els.promptProviderToggle.checked) {
@@ -4383,6 +7506,27 @@ function bindEvents() {
   els.confirmProviderAddBtn?.addEventListener("click", confirmProviderAdd);
   els.providerAddModal?.addEventListener("click", (event) => {
     if (event.target === els.providerAddModal) els.providerAddModal.classList.add("hidden");
+  });
+  els.providerNoteCloseX?.addEventListener("click", closeProviderNoteModal);
+  els.providerNoteCancelBtn?.addEventListener("click", closeProviderNoteModal);
+  els.providerNoteSaveBtn?.addEventListener("click", saveProviderNote);
+  els.providerNoteModal?.addEventListener("click", (event) => {
+    if (event.target === els.providerNoteModal) closeProviderNoteModal();
+  });
+  els.promptTestModelSelect?.addEventListener("change", syncPromptTestModelCustomInput);
+  els.promptTestModelSearch?.addEventListener("input", filterPromptTestModels);
+  els.promptTestStartBtn?.addEventListener("click", () => {
+    const model = selectedPromptTestModel();
+    if (!model) {
+      toast("请先选择或填写要检测的模型。", "error");
+      return;
+    }
+    closePromptTestModal(model);
+  });
+  els.promptTestCancelBtn?.addEventListener("click", () => closePromptTestModal(null));
+  els.promptTestCloseX?.addEventListener("click", () => closePromptTestModal(null));
+  els.promptTestModal?.addEventListener("click", (event) => {
+    if (event.target === els.promptTestModal) closePromptTestModal(null);
   });
   els.closeModelEditBtn?.addEventListener("click", () => els.modelEditModal?.classList.add("hidden"));
   els.modelEditSaveBtn?.addEventListener("click", saveModelEdit);
@@ -4407,17 +7551,6 @@ function bindEvents() {
   els.imageTestModal?.addEventListener("click", (event) => {
     if (event.target === els.imageTestModal) closeImageTestModal(null);
   });
-  $$("#modelTierTabs button").forEach((button) => {
-    button.addEventListener("click", async () => {
-      state.imageModelTier = normalizeImageModelTier(button.dataset.tier);
-      state.imageModelRoute = "auto";
-      state.config = await window.studio.saveConfig({
-        ...state.config,
-        imageModelRoute: state.imageModelRoute
-      });
-      syncImageModelRouteUi();
-    });
-  });
   $("#modelRoute").addEventListener("change", async (event) => {
     state.imageModelRoute = normalizeImageModelRoute(event.currentTarget.value);
     state.config = await window.studio.saveConfig({
@@ -4425,6 +7558,17 @@ function bindEvents() {
       imageModelRoute: state.imageModelRoute
     });
     syncImageModelRouteUi();
+  });
+  els.aplusImageModelRoute?.addEventListener("change", async (event) => {
+    setFeatureImageModelRoute("aplus", event.currentTarget.value);
+    state.config = await window.studio.saveConfig({
+      ...state.config,
+      featureImageModelRoutes: {
+        ...getFeatureImageModelRoutes(),
+        ...state.featureImageModelRoutes
+      }
+    });
+    syncFeatureImageModelRouteUi("aplus");
   });
   $("#grsai1kModel").addEventListener("change", () => {
     syncCustomModelInput("#grsai1kModel", "#grsai1kModelCustom");
@@ -4443,18 +7587,14 @@ function bindEvents() {
   $("#fetchImageModelsBtn").addEventListener("click", fetchImageModels);
   els.saveSelectedBtn?.addEventListener("click", saveSelectedResult);
   els.openSelectedBtn?.addEventListener("click", openSelectedResult);
-  els.regenerateSelectedBtn?.addEventListener("click", regenerateSelectedResult);
-  els.clearRepairMarksBtn?.addEventListener("click", resetRepairCanvas);
-  els.repairSelectedBtn?.addEventListener("click", repairSelectedResult);
-  els.repairCanvas?.addEventListener("pointerdown", beginRepairDrawing);
-  els.repairCanvas?.addEventListener("pointermove", moveRepairDrawing);
-  window.addEventListener("pointerup", endRepairDrawing);
-  els.repairCanvas?.addEventListener("touchstart", beginRepairDrawing, { passive: false });
-  els.repairCanvas?.addEventListener("touchmove", moveRepairDrawing, { passive: false });
-  window.addEventListener("touchend", endRepairDrawing);
   els.recoverHistoryBtn?.addEventListener("click", recoverHistoryFromCache);
+  els.closePromptDrawerBtn?.addEventListener("click", closePromptDrawer);
+  els.promptDrawer?.addEventListener("click", (event) => {
+    if (event.target === els.promptDrawer) closePromptDrawer();
+  });
 
   els.closeImageViewer.addEventListener("click", closeImageViewer);
+  els.saveViewerImageBtn?.addEventListener("click", saveViewerImage);
   els.imageViewer.addEventListener("click", (event) => {
     if (event.target === els.imageViewer) closeImageViewer();
   });
@@ -4469,6 +7609,9 @@ function bindEvents() {
     if (event.key === "Escape" && !els.imageViewer.classList.contains("hidden")) {
       closeImageViewer();
     }
+    if (event.key === "Escape" && els.promptDrawer && !els.promptDrawer.classList.contains("hidden")) {
+      closePromptDrawer();
+    }
     if (event.key === "Escape" && !els.cutoutConfirm.classList.contains("hidden")) {
       closeCutoutConfirm();
     }
@@ -4478,8 +7621,20 @@ function bindEvents() {
     if (event.key === "Escape" && !els.errorModal.classList.contains("hidden")) {
       closeErrorModal();
     }
+    if (event.key === "Escape" && els.updateModal && !els.updateModal.classList.contains("hidden")) {
+      closeUpdateModal();
+    }
     if (event.key === "Escape" && els.imageTestModal && !els.imageTestModal.classList.contains("hidden")) {
       closeImageTestModal(null);
+    }
+    if (event.key === "Escape" && els.promptTestModal && !els.promptTestModal.classList.contains("hidden")) {
+      closePromptTestModal(null);
+    }
+    if (event.key === "Escape" && els.providerContextMenu && !els.providerContextMenu.classList.contains("hidden")) {
+      closeProviderContextMenu();
+    }
+    if (event.key === "Escape" && els.providerNoteModal && !els.providerNoteModal.classList.contains("hidden")) {
+      closeProviderNoteModal();
     }
   });
 
@@ -4505,81 +7660,224 @@ function bindEvents() {
 
   window.studio.onGenerationBatch?.((batch) => {
     if (batch.generationId && batch.generationId !== state.activeGenerationId) return;
-    renderPendingResults(batch.items || [], batch.concurrency || 1);
-    els.statusLine.textContent = `已提交 ${batch.total || 0} 张任务，并发 ${batch.concurrency || 1} 路生成`;
+    const scope = generationScopeFromEvent(batch);
+    markGenerationHeartbeat();
+    renderPendingResults(batch.items || [], batch.concurrency || 1, scope);
+    if (scope === "image") setWorkflowStep("submit", "active", `${batch.total || 0} 张任务，并发 ${batch.concurrency || 1} 路`);
+    const statusLine = scopedStatusLine(scope);
+    if (statusLine) statusLine.textContent = `已提交 ${batch.total || 0} 张任务，并发 ${batch.concurrency || 1} 路生成`;
   });
 
   window.studio.onGenerationPlan?.((payload) => {
     if (payload.generationId && payload.generationId !== state.activeGenerationId) return;
-    renderSuitePlan(payload.suitePlan || null);
-    renderPromptPlan(payload.promptPlan || []);
+    const scope = generationScopeFromEvent(payload);
+    markGenerationHeartbeat();
+    renderSuitePlan(payload.suitePlan || null, scope);
+    renderPromptPlan(payload.promptPlan || [], scope);
   });
 
   window.studio.onGenerationProgress((progress) => {
     if (progress.generationId && progress.generationId !== state.activeGenerationId) return;
-    updatePendingCard(progress);
-    if (progress.current) {
-      state.liveProgressByIndex[progress.current] = progress;
+    const scope = generationScopeFromEvent(progress);
+    state.generationProgressReceived = true;
+    markGenerationHeartbeat();
+    updatePendingCard(progress, scope);
+    const weightedProgress = weightedGenerationProgress(progress, scope);
+    const progressByIndex = scopedLiveProgressByIndex(scope);
+    const totalCount = scopedLiveTotalCount(scope);
+    if (progress.current && !["rewriting-prompts", "planning-items", "accepted", "loading-config", "validating"].includes(progress.stage || "")) {
+      progressByIndex[progress.current] = {
+        ...progress,
+        progress: weightedProgress
+      };
+    }
+    if (scope === "image") {
+      if (progress.stage === "accepted") {
+        setWorkflowStep("planning", "active", "Task received");
+      } else if (progress.stage === "loading-config") {
+        setWorkflowStep("planning", "active", "Loading API settings");
+      } else if (progress.stage === "validating") {
+        setWorkflowStep("planning", "active", "Validating models and request");
+      } else if (progress.stage === "planning-items") {
+        setWorkflowStep("planning", "active", "Preparing " + (progress.total || totalCount || 0) + " selected images");
+      } else if (progress.stage === "rewriting-prompts") {
+        setWorkflowStep("planning", "done", "Prompt plan ready");
+        setWorkflowStep("prompts", "active", String(progress.current || 0) + "/" + String(progress.total || 0));
+      } else if (progress.stage === "submitting") {
+        setWorkflowStep("prompts", "done", "Category prompts generated");
+        setWorkflowStep("submit", "active", (progress.kind || "Image") + " / " + (progress.model || ""));
+      } else if (progress.stage === "completed") {
+        setWorkflowStep("submit", "done", (progress.kind || "Image") + " returned");
+        setWorkflowStep("render", "active", "Loading generated result");
+      }
     }
     const label = progress.total
-      ? progress.stage === "planning-suite"
-        ? `正在调用提示词模型规划套图 ${progress.total} 张`
+      ? progress.stage === "planning-items"
+        ? "Preparing " + progress.total + " selected images and prompt request"
         : progress.stage === "rewriting-prompts"
-        ? `正在调用提示词模型生成分类提示词 ${progress.current}/${progress.total}`
-        : `第 ${progress.current}/${progress.total} 张 · ${progress.kind || "结果图"} · ${progress.model || progress.status || "生成中"}`
-      : progress.stage || "生成中";
+        ? "Generating category prompts " + progress.current + "/" + progress.total
+        : String(progress.current || 0) + "/" + progress.total + " / " + (progress.kind || "Image") + " / " + (progress.model || progress.status || "Generating")
+      : progress.stage === "accepted"
+      ? "Generation task received"
+      : progress.stage === "loading-config"
+      ? "Loading API settings"
+      : progress.stage === "validating"
+      ? "Validating request"
+      : progress.stage || "Generating";
     if (progress.status === "failed" || progress.status === "timeout") {
-      setProgressFailed(`${progress.kind || "图片"}${progress.status === "timeout" ? "超时" : "失败"}：${shortErrorMessage(progress.error || progress.model || "")}`);
+      const message = `${progress.kind || "图片"}${progress.status === "timeout" ? "超时" : "失败"}：${shortErrorMessage(progress.error || progress.model || "")}`;
+      if (scope === "image") failWorkflowStep(progress.stage === "rewriting-prompts" ? "prompts" : "render", shortErrorMessage(progress.error || progress.model || ""));
+      setActiveGenerationProgress(100, message, "failed", scope);
       return;
     }
-    const progressValues = Object.values(state.liveProgressByIndex).map((item) => Number(item.progress || 0));
-    const averageProgress = progress.total && progressValues.length
+    const progressValues = Object.values(progressByIndex).map((item) => Number(item.progress || 0));
+    const averageProgress = progress.stage === "rewriting-prompts"
+      ? weightedProgress
+      : progress.total && progressValues.length
       ? progressValues.reduce((sum, value) => sum + value, 0) / progress.total
-      : progress.progress || 8;
-    setProgress(averageProgress, label);
+      : weightedProgress;
+    setActiveGenerationProgress(averageProgress, label, "active", scope);
   });
 
   window.studio.onGenerationResult((payload) => {
     if (payload.generationId && payload.generationId !== state.activeGenerationId) return;
+    const scope = generationScopeFromEvent(payload);
+    markGenerationHeartbeat();
     const results = payload.results || [];
-    state.liveCompletedCount += 1;
-    const total = payload.total || state.liveTotalCount || state.liveCompletedCount;
+    const completedCount = scopedLiveCompletedCount(scope) + 1;
+    setScopedLiveCompletedCount(scope, completedCount);
+    const total = payload.total || scopedLiveTotalCount(scope) || completedCount;
+    setScopedLiveTotalCount(scope, total);
+    const progressByIndex = scopedLiveProgressByIndex(scope);
+    const liveResults = scopedResults(scope);
     if (payload.current) {
-      state.liveProgressByIndex[payload.current] = {
-        ...(state.liveProgressByIndex[payload.current] || {}),
+      if (scope === "image") setWorkflowStep("render", "done", `已完成 ${completedCount}/${total} 张`);
+      progressByIndex[payload.current] = {
+        ...(progressByIndex[payload.current] || {}),
         progress: 100
       };
-      const progressValues = Object.values(state.liveProgressByIndex).map((item) => Number(item.progress || 0));
-      setProgress(progressValues.reduce((sum, value) => sum + value, 0) / total, `已完成 ${state.liveCompletedCount}/${total} 张`);
+      const progressValues = Object.values(progressByIndex).map((item) => Number(item.progress || 0));
+      setActiveGenerationProgress(progressValues.reduce((sum, value) => sum + value, 0) / total, `已完成 ${completedCount}/${total} 张`, "active", scope);
     }
-    for (const result of results) {
-      const liveIndex = payload.current ? payload.current - 1 : state.liveResults.length;
-      state.liveResults[liveIndex] = result;
-      replaceResultCard(result, payload.current || liveIndex + 1, liveIndex);
-      if (state.selectedResultIndex < 0) selectResult(liveIndex);
-    }
+    results.forEach((result, offset) => {
+      const shouldReplacePending = Boolean(payload.current) && offset === 0;
+      const liveIndex = shouldReplacePending ? payload.current - 1 : liveResults.length;
+      liveResults[liveIndex] = result;
+      replaceResultCard(result, shouldReplacePending ? payload.current : liveIndex + 1, liveIndex, scope);
+      if (scopedSelectedIndex(scope) < 0) selectResult(liveIndex, scope);
+    });
     if (!results.length) {
       const fallback = {
         kind: payload.kind,
         status: payload.status || "failed",
         error: payload.error || "未返回图片结果"
       };
-      const liveIndex = payload.current ? payload.current - 1 : state.liveResults.length;
-      state.liveResults[liveIndex] = fallback;
-      replaceResultCard(fallback, payload.current || liveIndex + 1, liveIndex);
-      if (state.selectedResultIndex < 0) selectResult(liveIndex);
+      const liveIndex = payload.current ? payload.current - 1 : liveResults.length;
+      liveResults[liveIndex] = fallback;
+      replaceResultCard(fallback, payload.current || liveIndex + 1, liveIndex, scope);
+      if (scopedSelectedIndex(scope) < 0) selectResult(liveIndex, scope);
     }
-    els.statusLine.textContent = `已完成 ${state.liveCompletedCount}/${total} 张`;
+    if (scope === "image") {
+      if (completedCount >= total) {
+        setWorkflowStep("done", "done", "结果已展示");
+      } else {
+        setWorkflowStep("render", "active", `等待剩余 ${Math.max(0, total - completedCount)} 张`);
+      }
+    }
+    const statusLine = scopedStatusLine(scope);
+    if (statusLine) statusLine.textContent = `已完成 ${completedCount}/${total} 张`;
   });
+
+  window.studio.onGenerationDone?.((payload) => {
+    const generationId = payload?.generationId;
+    if (!generationId) return;
+    logClientEvent("renderer-generation-done-event", {
+      generationId,
+      resultCount: payload?.results?.length || 0
+    });
+    const resolver = state.generationFinishResolvers[generationId];
+    if (!resolver) return;
+    payload.featureScope = generationScopeFromEvent(payload);
+    resolver.resolve(payload);
+  });
+
+  window.studio.onGenerationFailed?.((payload) => {
+    const generationId = payload?.generationId;
+    if (!generationId) return;
+    logClientEvent("renderer-generation-failed-event", {
+      generationId,
+      error: payload?.error || ""
+    });
+    const resolver = state.generationFinishResolvers[generationId];
+    if (!resolver) return;
+    resolver.reject(new Error(payload.error || "图片生成失败"));
+  });
+}
+
+function selectedAplusModules() {
+  return $$("[data-aplus-module]:checked").map((input) => input.dataset.aplusModule).filter(Boolean);
+}
+
+function aplusFormatToRatio(format = "970x600") {
+  const value = String(format || "");
+  if (value === "1464x600" || value === "970x600") return "16:9";
+  if (value === "600x450") return "4:3";
+  if (/^\d+:\d+$/.test(value)) return value;
+  return "16:9";
+}
+
+function buildAplusProductInfo() {
+  const name = els.aplusProductName?.value.trim() || "";
+  const info = els.aplusProductInfo?.value.trim() || "";
+  return [
+    name ? `商品名称：${name}` : "",
+    info ? `商品卖点&要求：${info}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function buildAplusPayload() {
+  const format = els.aplusFormat?.value || "970x600";
+  const modules = selectedAplusModules();
+  return {
+    featureScope: "aplus",
+    productInfo: buildAplusProductInfo(),
+    productPackageMode: state.productPackageMode,
+    images: state.aplus.images.slice(0, 6).map((image) => image.dataUrl),
+    analysis: state.aplus.analysis || null,
+    brand: {
+      ...state.brand,
+      platform: normalizeFeaturePlatform(els.aplusPlatform?.value || state.brand.platform),
+      region: els.aplusRegion?.value || state.brand.region,
+      language: els.aplusLanguage?.value || state.brand.language
+    },
+    resolution: state.resolution,
+    ratio: aplusFormatToRatio(format),
+    imageModelRoute: resolveImageModelForScope("aplus"),
+    referenceStrategy: "detail",
+    suiteMode: "aplus",
+    imageKinds: modules.map((module) => ({ kind: `A+/${module}`, count: 1, module })),
+    aPlusSize: format,
+    aplusModules: modules
+  };
 }
 
 async function init() {
   if (appInitialized) return;
   appInitialized = true;
+  logClientEvent("renderer-init-start");
   bindEvents();
-  state.config = ensureDefaultGrsaiGeminiConfig(await window.studio.getConfig());
+  logClientEvent("renderer-bind-events-done");
+  state.config = ensurePromptScopeDefaults(ensureDefaultGrsaiGeminiConfig(await window.studio.getConfig()));
+  logClientEvent("renderer-config-loaded", {
+    promptProvider: state.config.promptProvider,
+    imageProvider: state.config.imageProvider,
+    imageModelRoute: state.config.imageModelRoute
+  });
   state.selectedPromptProvider = state.config.promptProvider || "grsai-gemini";
   state.imageModelRoute = normalizeImageModelRoute(state.config.imageModelRoute);
+  state.featureImageModelRoutes = {
+    aplus: normalizeImageModelRoute(state.config.featureImageModelRoutes?.aplus || "auto")
+  };
   state.brand.region = state.config.defaultRegion || "US";
   state.brand.language = state.config.defaultLanguage || "English";
   state.brand.platform = state.config.defaultPlatform || "Amazon";
@@ -4597,8 +7895,14 @@ async function init() {
   renderTitleResult(null);
   populateModelRouteSelect();
   syncImageModelRouteUi();
+  syncSuiteModeUi();
+  syncAplusModuleUi();
+  renderAplusThumbs();
+  mountGlobalImageViewer();
   setRoute(localStorage.getItem(ACTIVE_ROUTE_STORAGE_KEY) || "image");
   await loadHistory();
+  scheduleStartupUpdateCheck();
+  logClientEvent("renderer-init-done");
 }
 
 function loadInviteSettings() {

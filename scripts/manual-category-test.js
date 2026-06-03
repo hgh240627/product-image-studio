@@ -11,7 +11,7 @@ const {
 const rootDir = path.resolve(__dirname, "..");
 const inputImagePath = path.resolve(rootDir, "..", "测试产品图片.png");
 const outputDir = path.join(rootDir, "output", "manual-test");
-const DEFAULT_KINDS = ["主图", "SKU图", "卖点图", "白底图", "场景图", "特写图", "高级A+"];
+const DEFAULT_KINDS = ["\u0053\u004b\u0055\u56fe", "\u5356\u70b9\u56fe", "\u767d\u5e95\u56fe", "\u573a\u666f\u56fe", "A+/\u7ec6\u8282\u6807\u6ce8\u56fe", "\u9ad8\u7ea7A+"];
 const MAX_PER_KIND = 2;
 
 function parseArgs(argv) {

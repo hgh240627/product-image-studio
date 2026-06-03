@@ -1,0 +1,13 @@
+{
+  "latestVersion": "0.1.53",
+  "title": "v0.1.53",
+  "summary": "修复设置弹窗层级问题，并加入非强制更新提醒。",
+  "downloadUrl": "https://github.com/<用户名>/<仓库名>/releases/download/v0.1.53/product-image-studio-0.1.53-Windows-x64.exe",
+  "releaseNotesUrl": "https://github.com/<用户名>/<仓库名>/releases/tag/v0.1.53",
+  "publishedAt": "2026-06-03",
+  "notes": [
+    "修复设置内获取模型列表/检测结果弹窗被设置面板遮挡的问题。",
+    "加入发现新版本、立即更新、稍后提醒、查看更新内容。",
+    "AI 工作台生图预览支持保存图片。"
+  ]
+}

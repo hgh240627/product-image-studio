@@ -1,17 +1,18 @@
 {
   "name": "product-image-studio",
-  "version": "0.1.22",
+  "version": "0.1.53",
   "productName": "全自动套图生成",
   "description": "Local desktop tool for automated product image set generation.",
   "author": "Local",
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
-    "check": "node --check main.js && node --check preload.js && node --check renderer/app.js && node scripts/check-local-file-reference-guard.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer/app.js && node scripts/check-local-file-reference-guard.js && node scripts/check-overlay-layering.js",
     "prompt-check": "node scripts/prompt-regression-check.js",
     "trend-check": "node scripts/trend-network-check.js",
+    "release-manifest": "node scripts/create-update-manifest.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win zip"
+    "dist": "electron-builder --win nsis zip"
   },
   "build": {
     "appId": "com.local.auto-image-set-generator",
@@ -34,13 +35,26 @@
       "signAndEditExecutable": false,
       "target": [
         {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "zip",
           "arch": [
             "x64"
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+      "artifactName": "product-image-studio-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   },
   "devDependencies": {

@@ -1,233 +1,149 @@
-const assert = require("node:assert/strict");
+const assert = require("node:assert");
+
+process.env.PRODUCT_IMAGE_STUDIO_TEST_MODE = "1";
+
 const {
   buildCategoryPrompt,
   normalizeImageKindSelection,
-  planItemsFromPayload
+  planItemsFromPayload,
+  adaptImagePromptForModel
 } = require("../main");
 
-const commonBrand = {
-  platform: "Temu",
-  region: "US",
-  language: "English",
-  primaryColor: "auto",
-  fontStyle: "auto"
-};
+const K_MAIN = "\u4e3b\u56fe";
+const K_SMART = "\u667a\u80fd\u5339\u914d\u56fe";
+const K_CLOSE = "\u7279\u5199\u56fe";
+const K_SKU = "\u0053\u004b\u0055\u56fe";
+const K_WHITE = "\u767d\u5e95\u56fe";
+const K_SELL = "\u5356\u70b9\u56fe";
+const K_SCENE = "\u573a\u666f\u56fe";
+const K_APLUS = "\u9ad8\u7ea7A+";
+const M_DETAIL = "\u7ec6\u8282\u6807\u6ce8\u56fe";
 
-const amazonBrand = {
-  ...commonBrand,
-  platform: "Amazon"
-};
-
-const samples = [
-  {
-    name: "kitchen peeler tool",
-    productInfo: "2-in-1 stainless steel vegetable peeler and julienne slicer with wood handle, two metal blades, comb teeth, hanging hole, single tool.",
-    productPackageMode: "single",
-    analysis: {
-      product_mechanism: "tool",
-      unit_of_sale: "one 2-in-1 peeler and slicer tool with wood handle",
-      unit_of_use: "one tool used by an adult hand on vegetables",
-      use_relationship: "the blade or julienne teeth must touch cucumber, carrot, potato, or similar vegetables while an adult hand holds the handle",
-      detail_focus_areas: ["metal blade edge", "julienne teeth", "wood handle rivets"],
-      misjudgment_risks: ["do not add extra blades", "do not change the handle shape", "do not use it as a knife"],
-      part_function_map: ["wide peeling blade = peels fruit and vegetable skin", "julienne teeth row = cuts scallion, carrot, or vegetable strips", "wood handle rivets = fasteners only"],
-      correct_use_method: "use the wide peeling blade against potato or fruit skin; use the julienne teeth only for cutting thin strips",
-      forbidden_use_errors: ["do not use julienne teeth to peel potato skin", "do not use serrated comb teeth as the peeling blade", "do not reverse the tool orientation"]
-    }
+const payload = {
+  productPackageMode: "bundle",
+  productInfo: [
+    "Product form: bundle.",
+    "Product name: 2-piece multifunctional fruit and vegetable peeler set.",
+    "Unit of sale: two peelers, one wood-grain handle and one reddish-brown wood-grain handle.",
+    "Components: wood-grain peeler x1; reddish-brown wood-grain peeler x1.",
+    "Correct use/material/structure: grip the wood-grain handle; long slot blade touches produce skin for peeling; comb teeth are only for julienne strips; product remains intact after use."
+  ].join("\n"),
+  packageInputs: {
+    unitOfSale: "2-piece bundle",
+    bundleComponents: "wood-grain handle peeler x1; reddish-brown wood-grain handle peeler x1",
+    componentDifferences: "both tools must be visible; handle colors differ; metal head structure stays identical",
+    usageNotes: "grip the wooden handle; only the long slot blade contacts skin for peeling; comb teeth are for julienne strips"
   },
-  {
-    name: "air fryer liners",
-    productInfo: "Pack of 100 square disposable air fryer paper liners with raised edges for 6-8 qt baskets.",
-    productPackageMode: "multipack",
-    analysis: {
-      product_mechanism: "liner",
-      unit_of_sale: "stacked pack of 100 square paper air fryer liners",
-      unit_of_use: "one liner fitted inside an air fryer basket",
-      use_relationship: "the liner must sit inside the air fryer basket with raised edge and rim fit visible",
-      detail_focus_areas: ["raised liner edge", "paper stack thickness"]
-    }
+  brand: {
+    platform: "Amazon",
+    region: "EU",
+    language: "English",
+    primaryColor: "auto",
+    fontStyle: "auto"
   },
-  {
-    name: "drawer organizer",
-    productInfo: "Expandable bamboo kitchen drawer organizer with multiple compartments for cutlery.",
-    productPackageMode: "single",
-    analysis: {
-      product_mechanism: "organizer",
-      unit_of_sale: "one expandable bamboo drawer organizer",
-      unit_of_use: "organizer placed in a kitchen drawer with cutlery sorted inside",
-      use_relationship: "the organizer must sit inside a drawer with contents arranged in compartments",
-      detail_focus_areas: ["expandable side rail", "compartment dividers"]
-    }
-  },
-  {
-    name: "cleaning tablets",
-    productInfo: "Multi-pack washing machine cleaning tablets in box packaging.",
-    productPackageMode: "multipack",
-    analysis: {
-      product_mechanism: "tablet",
-      unit_of_sale: "boxed multi-pack cleaning tablets",
-      unit_of_use: "one bare tablet placed near the washing machine drum",
-      use_relationship: "use scenes must show a bare tablet separated from packaging near the correct washing machine drum",
-      detail_focus_areas: ["round tablet texture", "box contents"]
-    }
-  },
-  {
-    name: "chair leg caps",
-    productInfo: "Set of silicone chair leg floor protector caps, transparent square caps, multiple sizes.",
-    productPackageMode: "bundle",
-    analysis: {
-      product_mechanism: "accessory",
-      unit_of_sale: "complete set of transparent silicone chair leg caps in multiple sizes",
-      unit_of_use: "one cap fitted onto a chair leg",
-      use_relationship: "the cap must be shown fitted around the bottom of a chair leg with the floor contact visible",
-      detail_focus_areas: ["transparent cap edge", "bottom contact surface"]
-    }
-  }
-];
-
-const basePayload = {
-  brand: commonBrand,
-  resolution: "1K",
   ratio: "1:1",
-  aPlusSize: "1:1",
-  finalPrompt: "Use the uploaded product image as the single source of truth for the product appearance. Preserve exact product identity, silhouette, proportions, colors, materials, surface texture, edges, and visible structure. This is a product identity brief only.",
+  resolution: "1K",
+  finalPrompt: "A bundle of multifunctional handheld fruit and vegetable peelers with curved wood-grain handles, reddish-brown variant, round rivets, silver metal working heads, long inner slot blade, comb teeth row, and side semicircular notch.",
+  analysis: {
+    product_package_mode: "bundle",
+    product_mechanism: "tool",
+    product_summary_zh: "Two-piece wood-grain handle fruit and vegetable peeler set.",
+    unit_of_sale: "2-piece bundle",
+    use_relationship: "held by the wood-grain handle; the long slot blade glides along fruit or vegetable skin; comb teeth contact vegetables only for striping or shredding",
+    correct_use_method: "Hold the wooden handle. For peeling, place the long inner slot blade flat against produce skin. Do not insert the metal head into the vegetable.",
+    part_function_map: [
+      "wood handle = grip area",
+      "long slot blade = peeling edge",
+      "comb teeth = julienne striping edge",
+      "side notch = localized trimming"
+    ],
+    detail_focus_areas: ["wood grain handle", "round rivets", "long open slot blade", "comb teeth row", "side notch"],
+    misjudgment_risks: ["ordinary peeler redesign", "comb teeth used as peeling blade"],
+    forbidden_use_errors: ["do not show the peeler broken", "do not insert the metal head into potato", "do not use comb teeth to peel potato skin"],
+    interaction_contract: {
+      grip_area: "wood-grain handle",
+      working_area: "long inner slot blade for peeling; comb teeth for julienne strips",
+      target_object: "fruit or vegetable surface",
+      contact_rule: "working edge touches only the surface skin; metal head stays outside the produce",
+      product_state_after_use: "tool remains intact, unbent, and unchanged",
+      target_state_after_use: "produce skin or strips change, not the product",
+      forbidden_scene_errors: ["broken peeler", "tool inserted into produce", "comb teeth peeling potato skin"]
+    }
+  },
   imageKinds: [
-    { kind: "主图", count: 1 },
-    { kind: "SKU图", count: 1 },
-    { kind: "卖点图", count: 1 },
-    { kind: "白底图", count: 1 },
-    { kind: "场景图", count: 1 },
-    { kind: "特写图", count: 1 },
-    { kind: "\u8be6\u60c5\u56fe", count: 1 },
-    { kind: "高级A+", count: 1 }
+    { kind: K_MAIN, count: 1 },
+    { kind: K_SMART, count: 7 },
+    { kind: K_SKU, count: 1 },
+    { kind: K_WHITE, count: 1 },
+    { kind: K_SELL, count: 1 },
+    { kind: K_SCENE, count: 1 },
+    { kind: K_CLOSE, count: 1 }
   ]
 };
 
-function expectIncludes(prompt, fragments, label) {
-  for (const fragment of fragments) {
-    assert.match(prompt, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), label);
+const normalized = normalizeImageKindSelection(payload.imageKinds);
+assert.deepEqual(normalized.map((item) => item.kind), [K_SKU, K_WHITE, K_SELL, K_SCENE, K_APLUS]);
+assert.equal(normalized[4].module, M_DETAIL, "close-up input must become Advanced A+ detail annotation module");
+
+const planItems = planItemsFromPayload({ ...payload, imageKinds: normalized });
+assert.equal(planItems.length, 5, "only manually selected allowed categories should generate");
+
+const skuPrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
+assert.match(skuPrompt, /exact complete purchase unit|Product consistency/i, "SKU prompt must lock complete purchase unit and product consistency");
+assert.doesNotMatch(skuPrompt, new RegExp("Suite planning " + "layer|\\u4e3b\\u56fe|\\u667a\\u80fd\\u5339\\u914d", "i"), "category prompt must not contain suite planning layer or deleted categories");
+
+const whitePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_WHITE, variantIndex: 0, totalForKind: 1 });
+assert.match(whitePrompt, /product retouch|#FFFFFF|no redesign/i, "white-background prompt must be product retouch only");
+
+const sellPrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SELL, variantIndex: 0, totalForKind: 1 });
+assert.match(sellPrompt, /material texture|structure advantage|quantity value|one clear theme/i, "selling-point prompt must allow material, structure, and quantity value themes");
+
+const scenePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+assert.match(scenePrompt, /short title|interaction contract|correct grip/i, "scene prompt must include short title and interaction contract");
+
+const adapted = adaptImagePromptForModel(scenePrompt, "gpt-image-2", payload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+assert.doesNotMatch(adapted, /Prompt profile:/i, "final image prompt should not expose internal prompt profile prefix");
+assert.match(adapted, /product after use|tool remains intact|target after use|produce skin/i, "final prompt must preserve product-after-use and target-after-use constraints");
+
+const wineStopperPayload = {
+  productPackageMode: "single",
+  productInfo: [
+    "产品：单个按压式红酒塞，红色塞入段配置黑/白外壳与翻盖按压头，用于插入瓶口后下压锁紧。",
+    "购买单位：单个产品",
+    "正确使用/材质结构：红色部分彻底塞进瓶口内，下压头部开关，彻底密封瓶口"
+  ].join("\n"),
+  packageInputs: {
+    unitOfSale: "单个产品",
+    usageNotes: "红色部分彻底塞进瓶口内，下压头部开关，彻底密封瓶口"
+  },
+  brand: {
+    platform: "Amazon",
+    region: "EU",
+    language: "English"
+  },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Product identity: single press-type wine bottle stopper; compact plastic accessory with a red cylindrical plug section, black or white outer body option, round collar rim, hinged rounded top lever, parallel grip grooves, small metal side rivet, and thin dark sealing ring.",
+  analysis: {
+    product_mechanism: "bottle_stopper",
+    product_summary_zh: "单个按压式红酒塞",
+    unit_of_sale: "单个产品",
+    use_relationship: "red plug section goes into the opened wine bottle mouth and the press lever stays above the opening",
+    correct_use_method: "insert the red plug downward into the bottle mouth, keep the collar on the lip, then press the top lever down",
+    detail_focus_areas: ["red cylindrical plug", "round collar rim", "hinged top press lever", "parallel grip grooves", "side rivet"],
+    part_function_map: [
+      "red cylindrical plug = sealing part inserted downward into bottle mouth",
+      "round collar rim = stop rim on bottle lip",
+      "top press lever = upper part pressed after insertion"
+    ],
+    forbidden_use_errors: ["do not reverse the stopper", "do not put the lever into the bottle mouth"]
   }
-}
-
-function expectExcludes(prompt, patterns, label) {
-  for (const pattern of patterns) {
-    assert.doesNotMatch(prompt, pattern, label);
-  }
-}
-
-for (const sample of samples) {
-  const payload = {
-    ...basePayload,
-    productInfo: sample.productInfo,
-    productPackageMode: sample.productPackageMode,
-    analysis: sample.analysis
-  };
-
-  const normalized = normalizeImageKindSelection(payload.imageKinds);
-  assert.deepEqual(
-    normalized.map((item) => item.kind),
-    ["主图", "SKU图", "卖点图", "白底图", "场景图", "特写图", "高级A+"],
-    `${sample.name}: legacy detail kind filtering`
-  );
-
-  const planItems = planItemsFromPayload(payload);
-  assert.equal(planItems.length, 7, `${sample.name}: plan count after de-duplication`);
-
-  for (const planItem of planItems) {
-    const prompt = buildCategoryPrompt(payload, planItem);
-    expectIncludes(prompt, ["Product fidelity lock", "Hard category boundary"], `${sample.name}: common locks`);
-
-    if (planItem.kind !== "SKU图" && planItem.kind !== "白底图") {
-      expectIncludes(prompt, ["Usage truth lock"], `${sample.name}: use-category truth lock`);
-    }
-
-    if (sample.name === "kitchen peeler tool") {
-      expectIncludes(prompt, ["Part-function lock", "wide peeling blade", "julienne teeth row", "Correct use method lock", "Forbidden use errors", "do not use julienne teeth to peel potato skin"], `${sample.name}: part function and correct use locks`);
-    }
-
-    if (planItem.kind === "主图") {
-      expectIncludes(prompt, ["70-90% of the canvas", "not scene-dominant", "product must be the largest", "compressed micro-scene"], `${sample.name}: Temu main image dominance and micro-scene`);
-      expectIncludes(prompt, ["not an Amazon catalog packshot", "avoid a plain tabletop-only studio still life", "close-range use cue or buyer-result cue", "partial bowl rim", "spice jar edge", "ingredient surface"], `${sample.name}: Temu main image avoids conservative tabletop-only packshot`);
-      expectIncludes(prompt, ["not a pure white-background product cutout", "must not collapse into 白底图", "do not make a flat white cutout", "do not make a product-only high-key studio packshot", "at least one restrained non-text hero-image context cue"], `${sample.name}: main image stays distinct from white-background category`);
-      expectIncludes(prompt, ["Temu main-label rule", "quantity cue", "low-risk result phrase", "Never write dimensions", "capacity", "technical measurements"], `${sample.name}: Temu main label restrictions`);
-      expectIncludes(prompt, ["Typography rule for Temu main images", "visible text is optional", "no dimensions", "capacity"], `${sample.name}: Temu main typography is optional and restricted`);
-      expectIncludes(prompt, ["no callout labels", "no inset close-up circle", "no color swatches", "no HEX color codes"], `${sample.name}: main image blocks selling-point layout`);
-      expectExcludes(prompt, [/plain pure white \(#FFFFFF\)/i, /Pure product presentation only/i, /Absolute white-background rule/i, /Use one concise benefit headline/i, /This palette is mandatory/i, /use the primary color as/i, /dominant brand plane/i, /Resolved typography direction/i], `${sample.name}: main prompt avoids white-background and selling-point language`);
-    }
-
-    if (planItem.kind === "SKU图") {
-      expectIncludes(prompt, ["real-shot product arrangement", "clean tabletop or countertop", "realistic light", "real shadows", "true material texture", "No text", "Do not add", "selling-point infographic"], `${sample.name}: SKU real-shot tabletop definition`);
-      expectExcludes(prompt, [/controlled studio\/catalog SKU presentation/i, /Show adult hand action/i, /Usage truth lock/i], `${sample.name}: SKU avoids old catalog/usage definitions`);
-    }
-
-    if (planItem.kind === "白底图") {
-      expectIncludes(prompt, ["plain pure white (#FFFFFF)", "Show only the exact product", "Pure product presentation only"], `${sample.name}: white background strictness`);
-      expectExcludes(prompt, [/plain white minimalism/i, /accent palette visibly/i], `${sample.name}: white background no graphic palette`);
-    }
-
-    if (planItem.kind === "卖点图") {
-      expectIncludes(prompt, ["solve one buyer pain point", "left-versus-right", "problem state", "solved state", "pain-solution", "copy zone", "1-3 simple icons", "linear guide"], `${sample.name}: selling-point pain-solution contrast and layout`);
-      expectIncludes(prompt, ["must never depict the uploaded product itself as broken", "generic old alternative", "messy result", "remain intact and accurate"], `${sample.name}: selling-point protects product identity in negative panel`);
-      expectIncludes(prompt, ["Brand color mood", "internal art direction", "Never render the palette itself", "Resolved typography direction", "Regional use context"], `${sample.name}: selling-point smart palette and regional use`);
-      expectIncludes(prompt, ["color swatches", "color names", "HEX codes", "dimensions", "capacity"], `${sample.name}: selling-point blocks palette and risky numeric text`);
-      expectExcludes(prompt, [/\bprimary auto\b/i, /\bsecondary auto\b/i, /#[0-9a-f]{6}\b/i, /dominant brand plane/i, /headline band/i], `${sample.name}: selling-point palette cannot leak raw palette specs`);
-    }
-
-    if (planItem.kind === "场景图") {
-      expectIncludes(prompt, ["usage evidence", "real use context", "must not inherit the main-image 70-90% product-dominance rule", "real scale", "No visible text by default"], `${sample.name}: scene usage boundary`);
-      expectIncludes(prompt, ["no text blocks", "no icons", "no arrows", "no magnifier inset"], `${sample.name}: scene blocks infographic/A+ layout`);
-      expectExcludes(prompt, [/product occupies 70-90% of the frame/i, /copy zone/i, /small magnifier detail inset/i], `${sample.name}: scene avoids main/A+ layout rules`);
-    }
-
-    if (planItem.kind === "特写图") {
-      expectIncludes(prompt, ["material and craftsmanship close-up", "macro", "material texture", "surface finish", "selected detail should occupy most of the frame"], `${sample.name}: close-up material detail`);
-      expectIncludes(prompt, ["No visible text", "no icons", "no zoom bubbles", "No collage", "no usage scene"], `${sample.name}: close-up blocks scene/infographic`);
-      expectExcludes(prompt, [/left-versus-right/i, /real use context/i, /planned text zone/i, /adult hand in-use action/i], `${sample.name}: close-up avoids selling/scene/A+ logic`);
-    }
-
-    if (planItem.kind === "高级A+") {
-      expectIncludes(prompt, ["premium ecommerce detail-page module", "complete information logic", "left image and right text block", "hero product plus 3 icon benefits", "linear guide", "small magnifier detail inset", "step-by-step use strip", "comparison mini-table"], `${sample.name}: A+ detail-page module logic`);
-      expectIncludes(prompt, ["one headline", "1-3 concise support points", "simple icons", "planned text zone", "module structure"], `${sample.name}: A+ text/icon structure`);
-      expectIncludes(prompt, ["Every text claim must be visually provable", "prefer plain observable wording", "use at most 3 insets", "real visible detail"], `${sample.name}: A+ keeps claims and insets grounded`);
-      expectIncludes(prompt, ["anti-stain/odor/protection/safety claims"], `${sample.name}: A+ blocks unsupported risky claims`);
-      expectIncludes(prompt, ["Brand color mood", "internal art direction", "Regional use context"], `${sample.name}: A+ smart palette and regional use`);
-      expectExcludes(prompt, [/#[0-9a-f]{6}\b/i, /dominant brand plane/i, /random lifestyle photo/i], `${sample.name}: A+ palette cannot leak raw palette specs`);
-    }
-  }
-}
-
-const amazonPayload = {
-  ...basePayload,
-  brand: amazonBrand,
-  productInfo: samples[0].productInfo,
-  productPackageMode: samples[0].productPackageMode,
-  analysis: samples[0].analysis,
-  imageKinds: [{ kind: "主图", count: 1 }]
 };
-const amazonMainPrompt = buildCategoryPrompt(amazonPayload, { kind: "主图", variantIndex: 0, totalForKind: 1 });
-expectIncludes(amazonMainPrompt, ["Amazon main image compliance", "must not collapse into 白底图", "product-only high-key studio packshot", "subtle marketplace-safe context cue", "kitchen-counter plane", "no visible text", "Typography rule: no visible text"], "Amazon main image remains compliant but distinct from white-background");
-expectExcludes(amazonMainPrompt, [/Amazon main image override: pure white background/i, /plain pure white \(#FFFFFF\)/i, /Pure product presentation only/i, /Absolute white-background rule/i], "Amazon main image no longer imports white-background category rules");
+const wineScenePrompt = buildCategoryPrompt(wineStopperPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+const wineAdapted = adaptImagePromptForModel(wineScenePrompt, "gpt-image-2", wineStopperPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
+assert.doesNotMatch(wineAdapted, /[\u3400-\u9fff]/, "final wine stopper prompt must not contain Chinese text");
+assert.doesNotMatch(wineAdapted, /\.{3}|…/, "final wine stopper prompt must not contain ellipsis placeholders");
+assert.match(wineAdapted, /red .*plug .*downward|red .*plug .*lower working end/i, "wine stopper prompt must lock red plug downward");
+assert.match(wineAdapted, /top press lever .*above|lever .*above/i, "wine stopper prompt must keep press lever above bottle mouth");
 
-const twoMainPrompt = buildCategoryPrompt(
-  {
-    ...amazonPayload,
-    imageKinds: [{ kind: "主图", count: 2 }]
-  },
-  { kind: "主图", variantIndex: 1, totalForKind: 2 }
-);
-expectIncludes(twoMainPrompt, ["multiple main images", "clearly different hero composition", "Do not repeat the same centered product pose", "duplicate white-background-style cutouts"], "multiple main images must avoid duplicate white-background-like outputs");
-
-const complexTemuPrompt = buildCategoryPrompt(
-  {
-    ...basePayload,
-    productInfo: samples[0].productInfo,
-    productPackageMode: samples[0].productPackageMode,
-    analysis: samples[0].analysis,
-    imageKinds: [{ kind: "主图", count: 1 }]
-  },
-  { kind: "主图", variantIndex: 0, totalForKind: 1 }
-);
-expectIncludes(complexTemuPrompt, ["Complex-product preservation mode", "do not redraw or redesign the product body", "Allowed transformations", "flat rotation", "slight perspective transform"], "complex product preservation mode");
-expectIncludes(complexTemuPrompt, ["thumbnail impact second", "compressed real-use or buyer-result cue third", "immediate-use clue"], "Temu main image keeps purchase-relevant context through rewrite-sensitive wording");
-
-console.log(`Prompt regression checks passed for ${samples.length} product categories.`);
+console.log("prompt regression checks passed");

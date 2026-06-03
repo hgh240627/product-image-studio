@@ -2,6 +2,10 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("studio", {
   getConfig: () => ipcRenderer.invoke("config:get"),
+  getRuntimeInfo: () => ipcRenderer.invoke("runtime:info"),
+  logClientEvent: (payload) => ipcRenderer.invoke("runtime:clientLog", payload),
+  checkUpdate: (payload) => ipcRenderer.invoke("update:check", payload),
+  openUpdateUrl: (url) => ipcRenderer.invoke("update:openUrl", url),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
   getHistory: () => ipcRenderer.invoke("history:get"),
   recoverHistoryFromCache: () => ipcRenderer.invoke("history:recoverFromCache"),
@@ -10,6 +14,9 @@ contextBridge.exposeInMainWorld("studio", {
   testImageApi: (config) => ipcRenderer.invoke("image:testConnection", config),
   listImageModels: (config) => ipcRenderer.invoke("image:listModels", config),
   analyzePrompt: (payload) => ipcRenderer.invoke("prompt:analyze", payload),
+  readAiFile: (payload) => ipcRenderer.invoke("ai:file:read", payload),
+  aiChat: (payload) => ipcRenderer.invoke("ai:chat", payload),
+  aiGenerateImage: (payload) => ipcRenderer.invoke("ai:image", payload),
   optimizeTitle: (payload) => ipcRenderer.invoke("title:optimize", payload),
   generateImage: (payload) => ipcRenderer.invoke("image:generate", payload),
   regenerateImage: (payload) => ipcRenderer.invoke("image:regenerate", payload),
@@ -36,5 +43,15 @@ contextBridge.exposeInMainWorld("studio", {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("generation:result", listener);
     return () => ipcRenderer.removeListener("generation:result", listener);
+  },
+  onGenerationDone: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("generation:done", listener);
+    return () => ipcRenderer.removeListener("generation:done", listener);
+  },
+  onGenerationFailed: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("generation:failed", listener);
+    return () => ipcRenderer.removeListener("generation:failed", listener);
   }
 });
