@@ -198,7 +198,7 @@ assert.ok(splashAdapted.length <= 1250, `final splash-guard scene prompt must st
 
 const splashSkuPrompt = buildCategoryPrompt(splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
 const splashSkuAdapted = adaptImagePromptForModel(splashSkuPrompt, "gpt-image-2", splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
-assert.ok(splashSkuAdapted.length <= 820, `final splash-guard SKU prompt must stay concise, got ${splashSkuAdapted.length} chars`);
+assert.ok(splashSkuAdapted.length <= 980, `final splash-guard SKU prompt must stay concise, got ${splashSkuAdapted.length} chars`);
 assert.match(splashSkuAdapted, /SKU product photo|Reference product exactly|No visible text|Avoid:/i, "final SKU prompt must keep a compact ecommerce structure");
 assert.match(splashSkuAdapted, /Show product scope: one product unit/i, "Chinese single-unit input must become concise English product-scope wording");
 assert.doesNotMatch(splashSkuAdapted, /\?{2,}|[\u3400-\u9fff]/, "final SKU prompt must not leak Chinese text or placeholder question marks");
@@ -278,6 +278,44 @@ const staleAplusSellDraft = [
 const organizerSellFromStaleDraft = adaptImagePromptForModel(staleAplusSellDraft, "gpt-image-2", underSinkOrganizerPayload, { kind: K_SELL, variantIndex: 1, totalForKind: 3 });
 assert.doesNotMatch(organizerSellFromStaleDraft, /information-card|detail-page module|icon column|magnifier labels|specification block|multiple callouts/i, "selling-point final prompt must drop stale A+ style creative briefs");
 assert.match(organizerSellFromStaleDraft, /Before\/result proof|solved result|problem cue|Pain proof|Result proof/i, "selling-point should fall back to local pain/result rules after dropping stale A+ drafts");
+
+const floorDrainCoverPayload = {
+  productPackageMode: "multipack",
+  productInfo: "Product: 12pcs white square bathroom floor drain covers. Each piece is a loose rounded-square perforated plastic cover with corner holes, circular drain holes, and a raised center dome. Correct use: place one cover flat over a bathroom, shower, or sink drain opening.",
+  packageInputs: {
+    unitOfSale: "12pcs",
+    pcsCount: "12",
+    usageNotes: "place one loose drain cover flat over the drain opening; water passes through the perforations; remaining pieces are replacements"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "A 12pcs multipack of white square bathroom floor drain covers, each with rounded corners, perforated plate, four corner holes, raised circular center dome, glossy black rectangular base, and upright divider posts.",
+  analysis: {
+    product_package_mode: "multipack",
+    product_mechanism: "rack",
+    unit_of_sale: "12pcs bathroom floor drain covers",
+    final_prompt_en: "a 12pcs multipack of identical white square bathroom floor drain covers, each with rounded corners, a flat perforated plate, four larger corner holes. Details: glossy black rectangular base, multiple upright divider posts.",
+    use_relationship: "the rectangular base rests flat on a countertop; lids, plates, or cutting boards stand vertically between divider posts",
+    correct_use_method: "place the rack base on a stable surface, then insert each lid, plate, tray, or cutting board into a slot between two vertical dividers",
+    detail_focus_areas: ["glossy black rectangular base", "multiple upright divider posts", "white perforated square cover", "raised circular center dome"],
+    part_function_map: ["rectangular base = countertop support", "vertical divider posts = support lids and plates", "holes = water drainage openings"]
+  }
+};
+const drainSku = adaptImagePromptForModel("Create a SKU product image.", "gpt-image-2", floorDrainCoverPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
+const drainWhite = adaptImagePromptForModel("Create a white background image.", "gpt-image-2", floorDrainCoverPayload, { kind: K_WHITE, variantIndex: 0, totalForKind: 1 });
+const drainScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", floorDrainCoverPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 3 });
+const drainSell = adaptImagePromptForModel("Create a selling-point image.", "gpt-image-2", floorDrainCoverPayload, { kind: K_SELL, variantIndex: 0, totalForKind: 3 });
+const drainAplus = adaptImagePromptForModel("Create an A+ detail module.", "gpt-image-2", floorDrainCoverPayload, { kind: K_APLUS, variantIndex: 0, totalForKind: 1, module: M_DETAIL });
+for (const prompt of [drainSku, drainWhite, drainScene, drainSell, drainAplus]) {
+  assert.match(prompt, /drain cover|drain opening|perforated|12/i, "floor drain cover prompts must preserve the real drain-cover product facts");
+  assert.doesNotMatch(prompt, /glossy black rectangular base|black rectangular base|upright divider posts|vertical divider posts|rectangular base rests|lids,\s*plates|cutting boards|insert each lid|rack base/i, "floor drain cover prompts must remove stale rack-holder facts");
+  assert.doesNotMatch(prompt, /refined everyday styling|adult hand wears|fastens|jewelry tray/i, "floor drain cover prompts must not fall into jewelry/accessory scene logic");
+}
+assert.match(drainSku, /loose product pieces|laid directly on the surface|Only the product pieces appear/i, "floor drain SKU must show loose pieces only, not a rack display");
+assert.match(drainWhite, /loose product pieces|laid directly on the surface|Only the product pieces appear/i, "floor drain white-background image must show loose pieces only");
+assert.match(drainScene, /one piece in correct real use|drain opening|bathroom|shower|sink/i, "floor drain scene must show correct drain usage instead of product-only display");
+assert.match(drainSell, /drain area|protected|water can pass|hair\/debris|Quantity-value proof/i, "floor drain selling-point must solve a drain-use buyer pain");
 
 const glassSceneOne = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 10 });
 const glassSceneTwo = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 10 });

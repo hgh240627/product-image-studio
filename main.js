@@ -2665,9 +2665,8 @@ function mergeTextField(current, fallback) {
 
 function operatorMechanismSourceText(payload = {}) {
   const packageInputs = payload.packageInputs && typeof payload.packageInputs === "object" ? payload.packageInputs : {};
-  return [
+  const trusted = [
     payload.productInfo,
-    payload.finalPrompt,
     payload.productName,
     packageInputs.unitOfSale,
     packageInputs.bundleComponents,
@@ -2675,6 +2674,11 @@ function operatorMechanismSourceText(payload = {}) {
     packageInputs.pcsCount,
     packageInputs.packArrangement,
     packageInputs.usageNotes
+  ].filter(Boolean).join(" ");
+  if (hasMeaningfulOperatorFacts(trusted)) return trusted.toLowerCase();
+  return [
+    trusted,
+    payload.finalPrompt
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -2724,6 +2728,7 @@ function mechanismEvidencePattern(mechanism = "") {
     cover: /\b(?:cover|lid|cap|guard|splash|splatter|bowl|plate|container)\b|[\u76d6\u7f69]|\u9632\u6e85|\u7897\u53e3|\u6405\u62cc/i,
     elastic_cover: /\b(?:elastic|stretch|food\s+cover|bowl\s+cover|plate\s+cover)\b|\u5f39\u6027|\u677e\u7d27|\u4fdd\u9c9c|\u98df\u54c1\u7f69|\u7897\u7f69|\u76d8\u7f69/i,
     rack: /\b(?:rack|holder|divider|slots?|shelf)\b|\u67b6|\u7f6e\u7269|\u6536\u7eb3|\u9694\u677f|\u7ad6\u69fd|\u5206\u9694/i,
+    drain_cover: /\b(?:bathroom\s+floor\s+drain\s+covers?|floor\s+drain\s+covers?|shower\s+drain\s+covers?|sink\s+drain\s+covers?|drain\s+covers?|drain\s+strainers?|drain\s+filters?|hair\s+catchers?)\b|\u5730\u6f0f|\u6392\u6c34\u53e3|\u4e0b\u6c34|\u9632\u5835|\u6ee4\u7f51/i,
     organizer: /\b(?:organizer|storage|holder|shelf|drawer|cabinet|basket|rack)\b|\u6536\u7eb3|\u7f6e\u7269|\u6574\u7406|\u62bd\u5c49|\u67b6|\u76d2/i,
     tool: /\b(?:tool|peeler|cutter|brush|scraper|knife|spatula|scissors|handle|blade)\b|\u5de5\u5177|\u5200|\u5237|\u94f2|\u522e|\u526a|\u624b\u67c4|\u6728\u67c4/i,
     bottle_stopper: /\b(?:wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|sealing\s+plug|bottle\s+mouth)\b|\u9152\u74f6\u585e|\u7ea2\u9152\u585e|\u5c01\u53e3\u585e|\u74f6\u585e|\u74f6\u53e3/i,
@@ -2747,6 +2752,11 @@ function promptForeignMechanicRules() {
       name: "storage/moving bag",
       evidence: bagEvidencePattern(),
       conflict: /\b(?:closet storage|wardrobe storage|storage bag|moving bag|packing bag|zipper lid|zippered lid|zipper closure|sewn handles?|webbing handles?|soft goods?|moving boxes?)\b|\u6536\u7eb3\u888b|\u50a8\u7269\u888b|\u62c9\u94fe|\u8863\u67dc\u6536\u7eb3|\u8f6f\u7269\u6536\u7eb3/i
+    },
+    {
+      name: "rack/slot holder",
+      evidence: /\b(?:lid\s+rack|pot\s+lid\s+rack|plate\s+rack|cutting\s+board\s+rack|rack\s+with\s+slots|organizer\s+rack|storage\s+rack|divider\s+posts?|vertical\s+dividers?|slot\s+holder)\b|\u9505\u76d6\u67b6|\u76d8\u67b6|\u7827\u677f\u67b6|\u7f6e\u7269\u67b6|\u6536\u7eb3\u67b6|\u5206\u9694\u67f1|\u7ad6\u69fd/i,
+      conflict: /\b(?:glossy\s+black\s+rectangular\s+base|black\s+rectangular\s+base|rack\s+base|rectangular\s+base\s+rests|upright\s+divider\s+posts?|vertical\s+divider\s+posts?|divider\s+slots?|between\s+divider\s+posts?|insert\s+each\s+lid|lids,\s*plates|cutting\s+boards?\s+stand|slot\s+support)\b|\u5206\u9694\u67f1|\u7ad6\u69fd|\u9505\u76d6\u67b6|\u76d8\u67b6|\u7827\u677f\u67b6/i
     }
   ];
 }
@@ -2763,6 +2773,32 @@ function unsupportedForeignMechanicConflict(prompt = "", factSource = "") {
 
 function filterUnsupportedForeignMechanics(items, factSource = "") {
   return normalizeStringList(items).filter((item) => !unsupportedForeignMechanicConflict(item, factSource));
+}
+
+function stripUnsupportedForeignMechanicPhrases(text = "", factSource = "") {
+  let value = String(text || "");
+  if (!value.trim()) return "";
+  const conflict = unsupportedForeignMechanicConflict(value, factSource);
+  if (conflict === "rack/slot holder") {
+    value = value
+      .replace(/\bDetails:\s*(?:glossy\s+black\s+rectangular\s+base|black\s+rectangular\s+base|multiple\s+upright\s+divider\s+posts?|upright\s+divider\s+posts?|vertical\s+divider\s+posts?)(?:\s*,\s*|\s+and\s+)*/gi, "Details: ")
+      .replace(/\b(?:glossy\s+black\s+rectangular\s+base|black\s+rectangular\s+base|rack\s+base|multiple\s+upright\s+divider\s+posts?|upright\s+divider\s+posts?|vertical\s+divider\s+posts?|divider\s+slots?|slot\s+support)\b/gi, "")
+      .replace(/\b(?:rectangular\s+base|vertical\s+divider\s+posts?)\s*=\s*[^.;]+[.;]?/gi, "")
+      .replace(/\b(?:lids,\s*plates,\s*or\s*cutting\s+boards|lids\s+and\s+plates|insert\s+each\s+lid|cutting\s+boards?\s+stand)[^.]*[.]?/gi, "");
+  }
+  if (conflict === "storage/moving bag") {
+    value = value
+      .replace(/\b(?:closet storage|wardrobe storage|storage bag|moving bag|packing bag|zipper lid|zippered lid|sewn handles?|webbing handles?|soft goods?|moving boxes?)\b/gi, "");
+  }
+  return value
+    .replace(/\bDetails:\s*(?:[.,;]\s*)*/gi, "Details: ")
+    .replace(/Details:\s*(?:\.|$)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/,\s*,+/g, ",")
+    .replace(/,\s*\./g, ".")
+    .replace(/\.\s*\./g, ".")
+    .trim();
 }
 
 function productMechanismProfile(payload = {}, analysis = {}) {
@@ -2797,6 +2833,7 @@ function productMechanismProfile(payload = {}, analysis = {}) {
   const hasPeelerTool = /(?:peeler|peeling|julienne|serrated|comb[-\s]*like|comb\s+teeth|bottle\s+opener|open\s+slot|wood\s+handle|rivet|削皮|刨皮|刨丝|削皮刀|刨皮刀|木柄|铆钉|开瓶|梳齿|齿刃|锯齿)/i.test(source);
   const hasPressWineStopper = /(?:wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|press[-\s]*type|press\s+to\s+close|red\s+(?:cylindrical\s+)?plug|sealing\s+plug|stopper\s+lever|bottle\s+mouth|酒瓶塞|红酒塞|封口塞|瓶塞|按压式|按压手柄|红色塞|红色部分|瓶口)/i.test(source);
   const hasMovingBag = bagEvidencePattern().test(source);
+  const hasDrainCover = /(?:bathroom\s+floor\s+drain\s+covers?|floor\s+drain\s+covers?|shower\s+drain\s+covers?|sink\s+drain\s+covers?|drain\s+covers?|drain\s+strainers?|drain\s+filters?|hair\s+catchers?|perforated\s+drain\s+plate|地漏盖|地漏|排水盖|排水口盖|下水道盖|防堵盖|滤发器|排水滤网)/i.test(source);
   const hasRackHolder = /(?:lid\s+rack|pot\s+lid\s+rack|plate\s+rack|cutting\s+board\s+rack|organizer\s+rack|vertical\s+divider|slots?|锅盖架|盖架|盘架|砧板架|置物架|收纳架|隔板|竖槽|分隔柱)/i.test(source);
 
   if (hasElasticFoodCover) {
@@ -2968,7 +3005,37 @@ function productMechanismProfile(payload = {}, analysis = {}) {
     ]);
   }
 
-  if (hasRackHolder) {
+  if (hasDrainCover) {
+    setMissing("product_mechanism", "drain_cover");
+    setMissing("unit_of_use", "one loose perforated cover placed flat over a bathroom, shower, or sink drain opening");
+    setMissing("use_relationship", "one loose drain cover sits flat over the drain opening; water passes through the perforations while hair or debris is blocked on top");
+    setMissing("correct_use_method", "place one cover directly over the drain opening with the perforated face upward, keep it flat and removable, and replace with another loose piece when needed");
+    add("key_action_frames", [
+      "adult hand places one loose drain cover flat over a bathroom or shower drain opening",
+      "water flows toward a covered drain while the perforated white cover stays flat",
+      "the multipack pieces are shown loose and countable nearby only when proving value"
+    ]);
+    add("detail_focus_areas", ["loose white square cover pieces", "rounded square corners", "perforated drain holes", "larger corner holes", "raised circular center dome"]);
+    add("misjudgment_risks", [
+      "do not add a black rack, display stand, tray, holder, base, or divider posts",
+      "do not turn the loose drain covers into a mounted organizer or storage rack",
+      "do not change the white perforated cover into a metal drain grate",
+      "do not show lids, plates, cutting boards, or kitchen rack use"
+    ]);
+    add("part_function_map", [
+      "perforated cover plate = covers drain opening and lets water pass through",
+      "holes = water drainage openings",
+      "raised center dome = visible drain-cover structure",
+      "each piece = one loose replaceable drain cover"
+    ]);
+    add("forbidden_use_errors", [
+      "do not insert covers into divider slots",
+      "do not place covers in a rack, tray, holder, or display base",
+      "do not use the covers as plates, lids, coasters, tiles, or organizer dividers"
+    ]);
+  }
+
+  if (hasRackHolder && !hasDrainCover) {
     setMissing("product_mechanism", "rack");
     setMissing("unit_of_sale", "one black countertop rack with a rectangular base and multiple vertical divider slots");
     setMissing("unit_of_use", "one rack placed flat on a countertop holding lids, plates, cutting boards, trays, or similar flat items upright between dividers");
@@ -3020,7 +3087,10 @@ function applyProductMechanismProfile(payload = {}, analysis = {}) {
   if (currentMechanismUnsupported) {
     next.product_mechanism = profile?.product_mechanism || inferProductMechanism(operatorSource) || "unknown";
     for (const key of ["product_summary_zh", "product_summary", "summary_zh", "final_prompt_en"]) {
-      if (unsupportedForeignMechanicConflict(next[key], operatorSource)) next[key] = "";
+      if (unsupportedForeignMechanicConflict(next[key], operatorSource)) {
+        const cleaned = stripUnsupportedForeignMechanicPhrases(next[key], operatorSource);
+        next[key] = unsupportedForeignMechanicConflict(cleaned, operatorSource) ? "" : cleaned;
+      }
     }
   } else if (!currentMechanism || currentMechanism === "unknown" || (profile && highConfidenceMechanisms.has(profile.product_mechanism) && ["wrap", "cover", "sheet", "organizer", "accessory"].includes(currentMechanism))) {
     next.product_mechanism = profile.product_mechanism || currentMechanism;
@@ -5613,6 +5683,7 @@ function inferProductMechanism(text) {
     ["rack", /\b(lid rack|pot lid rack|plate rack|cutting board rack|rack with slots|vertical divider)\b|锅盖架|盖架|盘架|砧板架|竖槽|分隔柱/],
     ["tool", /\b(tool|peeler|cutter|brush|scraper|knife|spatula|julienne|serrated|comb[-\s]*like|comb\s+teeth|bottle\s+opener|open\s+slot|wood\s+handle|rivet)\b|削皮|刨皮|刨丝|削皮刀|刨皮刀|木柄|铆钉|开瓶|梳齿|齿刃|锯齿/],
     ["bottle_stopper", /\b(wine\s+bottle\s+stopper|bottle\s+stopper|wine\s+stopper|press[-\s]*type|press\s+to\s+close|red\s+(?:cylindrical\s+)?plug|sealing\s+plug|bottle\s+mouth)\b|酒瓶塞|红酒塞|封口塞|瓶塞|按压式|红色塞|瓶口/],
+    ["drain_cover", /\b(?:bathroom\s+floor\s+drain\s+covers?|floor\s+drain\s+covers?|shower\s+drain\s+covers?|sink\s+drain\s+covers?|drain\s+covers?|drain\s+strainers?|drain\s+filters?|hair\s+catchers?|perforated\s+drain\s+plate)\b|地漏盖|地漏|排水盖|排水口盖|下水道盖|防堵盖|滤发器|排水滤网/],
     ["cover", /\b(cover|lid|food cover|cap|guard|splash|splatter)\b|[\u76d6\u7f69]|\u9632\u6e85|\u7897\u53e3|\u6405\u62cc/],
     ["wrap", /\b(wrap|film|foil|cling)\b/],
     ["bag", bagEvidencePattern()],
@@ -5624,7 +5695,7 @@ function inferProductMechanism(text) {
     ["tablet", /\b(tablet|cleaning tablet)\b/],
     ["pod", /\b(pod|capsule)\b/],
     ["liquid", /\b(liquid|spray|gel|solution)\b/],
-    ["wearable", /\b(hair tie|hair band|scrunchie|hair clip|ring|bracelet|watch band|glasses|sunglasses|hat|cap|belt)\b|发圈|发绳|头绳|发夹|戒指|手环|表带|眼镜|帽子|腰带/],
+    ["wearable", /\b(hair tie|hair band|scrunchie|hair clip|finger ring|wedding ring|engagement ring|bracelet|watch band|eyeglasses|sunglasses|hat|cap|belt)\b|发圈|发绳|头绳|发夹|戒指|手环|表带|眼镜|帽子|腰带/],
     ["apparel", /\b(shirt|dress|pants|leggings|socks|shoes|boots|slipper|jacket|coat|underwear|bra)\b|衣服|连衣裙|裤|袜|鞋|靴|拖鞋|外套|内衣/],
     ["beauty", /\b(makeup|cosmetic|cream|serum|shampoo|skincare|lipstick|mascara|nail|perfume)\b|美妆|化妆|护肤|面霜|精华|洗发|口红|睫毛|指甲|香水/],
     ["electronics", /\b(phone|charger|cable|earbuds|headphones|speaker|lamp|led|camera|keyboard|mouse|adapter|power strip)\b|手机|充电|数据线|耳机|音箱|灯|相机|键盘|鼠标|插座|排插/],
@@ -5735,16 +5806,19 @@ function inferVisiblePartTerms(source = "") {
 }
 
 function buildProductIdentityLock(payload = {}, analysis = {}, strategy = {}) {
+  const operatorSource = operatorMechanismSourceText(payload);
+  const safeAnalysisPrompt = stripUnsupportedForeignMechanicPhrases(analysis.final_prompt_en || "", operatorSource);
+  const safePayloadPrompt = stripUnsupportedForeignMechanicPhrases(payload.finalPrompt || "", operatorSource);
   const sources = [
-    analysis.final_prompt_en,
-    payload.finalPrompt,
+    safeAnalysisPrompt,
+    safePayloadPrompt,
     analysis.product_summary_zh,
     payload.productInfo,
     normalizeStringList(analysis.detail_focus_areas).join("; "),
     normalizeStringList(analysis.part_function_map).join("; "),
     normalizeStringList(analysis.misjudgment_risks).join("; ")
   ].filter(Boolean).join(" ");
-  const rawIdentityBrief = sanitizeProductIdentityBrief(analysis.final_prompt_en || payload.finalPrompt || "");
+  const rawIdentityBrief = sanitizeProductIdentityBrief(safeAnalysisPrompt || safePayloadPrompt || "");
   const genericIdentityBrief = /uploaded product image|single source of truth|preserve exact product identity|product identity brief only/i.test(rawIdentityBrief);
   const visibleIdentity = compactPromptText(stripUseAndCompositionFromIdentity(
     (!genericIdentityBrief && rawIdentityBrief) || payload.productInfo || analysis.product_summary_zh || sources
@@ -5878,6 +5952,7 @@ function visualStrategyFromPayload(payload, identityBrief) {
     cover: "Always show covered target object and visible rim/edge/opening relation; never show an empty cover alone as the main proof.",
     wrap: "Show covering, lining, edge adhesion, or contact surface; never show a floating film sheet without a target object.",
     bag: "Show opening, capacity, contents, or organized placement; never show only an empty bag.",
+    drain_cover: "Show one loose perforated cover flat over a bathroom, shower, or sink drain opening; remaining pieces may appear loose nearby only for pack value.",
     rack: "Show the rack base, repeated vertical slots, and correctly inserted lids/plates/cutting boards; never let stored items float or pierce divider posts.",
     organizer: "Show contents and organized result; never show an empty organizer as the main proof.",
     container: "Show opening, contents, capacity, or completed placement; avoid empty-container-only scenes.",
@@ -5911,6 +5986,7 @@ function visualStrategyFromPayload(payload, identityBrief) {
     cover: "first visual should prove covering relation: product covering the target object with edge/rim contact visible",
     wrap: "first visual should prove covering or lining relation with visible edges and contact surface",
     bag: "first visual should prove capacity or organization with contents visible through the opening",
+    drain_cover: "first visual should prove drain use or 12-pack value: one loose white perforated cover flat over a drain opening, with remaining loose pieces nearby only when helpful",
     rack: "first visual should prove slot support: black base on countertop with lids/plates/cutting boards standing between vertical dividers",
     organizer: "first visual should prove organized result and capacity with contents placed inside",
     container: "first visual should prove capacity, contents, or completed placement",
@@ -6347,7 +6423,7 @@ function modelPromptFactSourceText(facts = {}) {
 function modelCreativeBrief(prompt = "", facts = null) {
   const text = sanitizeFinalImagePromptText(prompt);
   if (!text || isInternalLocalPromptText(text)) return "";
-  if (/^create\s+(?:a|one)\s+(?:lifestyle usage image|selling-point image|sku product photo|ecommerce product image)\.?$/i.test(text)) return "";
+  if (/^create\s+(?:an?\s+|one\s+)?(?:image|lifestyle usage image|selling-point image|sku product photo|ecommerce product image)\.?$/i.test(text)) return "";
   if (facts && unsupportedForeignMechanicConflict(text, modelPromptFactSourceText(facts))) return "";
   if (facts && !facts.hasPackagingReference && /\b(?:retail box|gift box|carton|packaging|package|printed package|box beside|boxed set)\b/i.test(text)) return "";
   if (facts?.kind === "卖点图" && /\b(?:A\+|detail-page module|information-card|icon column|magnifier|specification block|callout|annotation)\b/i.test(text)) return "";
@@ -6385,8 +6461,8 @@ function modelSpecificTextPolicy(kind, platform) {
 }
 
 function finalPromptMaxLengthForKind(kind = "", profile = {}) {
-  if (kind === "白底图") return 760;
-  if (kind === "SKU图") return 820;
+  if (kind === "白底图") return 980;
+  if (kind === "SKU图") return 980;
   if (kind === "场景图") return 1250;
   if (kind === "卖点图") return 1180;
   if (kind === "高级A+") return 1180;
@@ -6740,7 +6816,7 @@ function stripFinalPromptLabelPrefixes(value = "") {
 
 function finalPromptProductIdentity(facts = {}, maxLength = 280) {
   const identity = compactPhraseList(stripFinalPromptLabelPrefixes(facts.productFacts || facts.identityLock || ""), Math.max(160, maxLength - 70), 6);
-  const visibleParts = compactPhraseList(stripFinalPromptLabelPrefixes(facts.visibleParts || facts.detailFocus || ""), 70, 3);
+  const visibleParts = compactPhraseList(stripFinalPromptLabelPrefixes(facts.visibleParts || facts.detailFocus || ""), 120, 4);
   const combined = [identity, visibleParts && !identity.toLowerCase().includes(visibleParts.toLowerCase()) ? `Details: ${visibleParts}` : ""]
     .filter(Boolean)
     .join(". ");
@@ -6797,6 +6873,16 @@ function productReferenceHasPackaging(payload = {}, analysis = {}, strategy = {}
 
 function finalPromptQuantityLine(facts = {}) {
   if (facts.packageMode === "multipack" && facts.pcsCount) {
+    const family = productScenarioFamily(facts);
+    if (facts.kind === "SKU图" || facts.kind === "白底图") {
+      return `Quantity: exactly ${facts.pcsCount} identical loose pieces, countable, laid directly on the surface; no display rack, holder, base, or divider.`;
+    }
+    if (facts.kind === "场景图") {
+      return `Quantity context: ${facts.pcsCount}-piece multipack; show one piece in correct real use and remaining loose pieces nearby only if useful.`;
+    }
+    if (family === "drain-accessory") {
+      return `Quantity/value: ${facts.pcsCount} loose pieces; show the value set loose, or one piece in drain use with remaining pieces nearby.`;
+    }
     return `Quantity: show exactly ${facts.pcsCount} identical product pieces, countable and separate; do not invent extra sale/display objects.`;
   }
   return "";
@@ -6804,13 +6890,14 @@ function finalPromptQuantityLine(facts = {}) {
 
 function finalPromptPackagingGuard(facts = {}) {
   if (facts.hasPackagingReference) return "Only show sale/display materials that are visible in the uploaded reference image.";
-  if (facts.kind === "SKU图") return "Only the product pieces appear; no extra visible objects.";
+  if (facts.kind === "SKU图" || facts.kind === "白底图") return "Only the product pieces appear; no extra visible objects, rack, holder, base, or divider.";
   return "Only the product pieces may look included; no extra sale/display materials or included-looking containers.";
 }
 
 function productScenarioFamily(facts = {}) {
   const source = [facts.productFacts, facts.useRelationship, facts.correctUse, facts.visibleParts, facts.partFunctions].filter(Boolean).join(" ");
   const has = (pattern) => pattern.test(source);
+  if (has(/\b(?:bathroom\s+floor\s+drain\s+covers?|floor\s+drain\s+covers?|shower\s+drain\s+covers?|sink\s+drain\s+covers?|drain\s+covers?|drain\s+strainers?|drain\s+filters?|hair\s+catchers?|perforated\s+drain\s+plate)\b|地漏盖|地漏|排水盖|排水口盖|下水道盖|防堵盖|滤发器|排水滤网/i)) return "drain-accessory";
   if (has(/\b(under[-\s]?sink|sink cabinet|pull[-\s]?out tray|side cup holder|cup holder|cabinet organizer|drawer organizer|shelf organizer|storage rack|storage shelf|two[-\s]?tier organizer)\b/i)) return "organizer";
   if (has(/\b(champagne|wine|glass|goblet|stemmed|tumbler|cup|mug|drinkware|flute)\b|香槟杯|红酒杯|高脚杯|玻璃杯|水杯|茶杯|咖啡杯|杯子|杯具|饮具/i)) return "drinkware";
   if (has(/\b(phone|smartphone|tablet|laptop|notebook computer|charger|charging|cable|adapter|usb|type-c|screen protector|phone case|tablet case|laptop sleeve|earbud|headphone|device stand|phone stand|tablet stand|laptop stand|magsafe|power bank)\b|手机|平板|笔记本电脑|充电|数据线|转接头|适配器|耳机|蓝牙|电源|屏幕保护|钢化膜|手机壳|保护壳/i)) return "electronics-accessory";
@@ -6821,7 +6908,7 @@ function productScenarioFamily(facts = {}) {
   if (has(/\b(baby|kids|child|toy|game|puzzle|learning|school|stationery|pen|marker|crayon|notebook|craft|drawing)\b|婴儿|儿童|孩子|玩具|拼图|游戏|学习|学校|文具|画笔|马克笔|蜡笔|笔记本|手工|绘画/i)) return "kids-stationery";
   if (has(/\b(yoga|fitness|exercise|workout|dumbbell|resistance band|sports?|training|gym|ball|helmet|protective gear)\b|瑜伽|健身|运动|训练|哑铃|弹力带|球类|头盔|护具/i)) return "sports-fitness";
   if (has(/\b(apparel|clothing|garment|shirt|pants|dress|shoe|sneaker|hat|cap|belt|sock|glove|scarf|wallet|handbag)\b|服装|衣服|上衣|裤子|裙子|鞋|帽子|腰带|袜子|手套|围巾|钱包|手提包/i)) return "apparel-accessory";
-  if (has(/\b(jewelry|jewellery|watch|ring|necklace|bracelet|earring|pendant|brooch|anklet)\b|珠宝|首饰|手表|戒指|项链|手链|耳环|吊坠|胸针|脚链/i)) return "jewelry-watch";
+  if (has(/\b(jewelry|jewellery|watch|finger ring|wedding ring|engagement ring|necklace|bracelet|earring|pendant|brooch|anklet)\b|珠宝|首饰|手表|戒指|项链|手链|耳环|吊坠|胸针|脚链/i)) return "jewelry-watch";
   if (has(/\b(peeler|knife|slicer|cutter|blade|kitchen tool|utensil|shredder|spatula|tongs|whisk|colander|measuring spoon|baking tool)\b|削皮器|刨丝|刀具|切片器|厨房工具|厨具|锅铲|夹子|打蛋器|滤网|量勺|烘焙工具/i)) return "kitchen-tool";
   if (has(/\b(splash guard|bowl cover|food cover|elastic rim|pot lid|pan lid|container lid|protective cover|dust cover|cover lid)\b|防溅盖|碗盖|食物盖|保鲜盖|锅盖|盖子|防尘罩|保护罩|弹性边/i)) return "cover";
   if (has(/\b(bag|pouch|tote|backpack|storage bag|packing cube|fabric|textile|blanket|pillow|curtain|mat|rug|towel|apron)\b|布袋|收纳袋|背包|手提袋|纺织|布料|毯子|枕头|窗帘|垫子|地毯|毛巾|围裙/i)) return "soft-goods";
@@ -6868,6 +6955,18 @@ const SCENE_DIRECTIVE_TABLE = {
     "Action: tidy after-use kitchen scene with product naturally present and target still recognizable.",
     "Action: ready-to-use placement near the correct target object, no invented packaging or accessories.",
     "Action: distinct daily-use context such as baking, food prep, storage, or serving, depending on product facts."
+  ],
+  "drain-accessory": [
+    "Action: adult hand places one loose perforated cover flat over a bathroom, shower, or sink drain opening at true scale.",
+    "Action: water flows toward the covered drain while the white perforated cover stays flat and removable.",
+    "Action: value-set proof with loose identical pieces arranged nearby on a clean bathroom surface, plus one piece in the correct drain position.",
+    "Action: after-use bathroom or shower floor moment with the drain opening covered and debris/hair control implied visually.",
+    "Action: close lifestyle detail of perforation pattern, rounded square corners, raised center dome, and flat contact over the drain.",
+    "Action: multipack count proof only when needed, pieces loose and countable without any rack, tray, holder, base, or divider.",
+    "Action: alternate bathroom angle and hand placement from other variants, product remains flat over or near the drain.",
+    "Action: tidy post-use bathroom sink, shower, or floor-drain area with the cover naturally present.",
+    "Action: ready-to-replace placement with one piece being swapped by hand and remaining pieces loose nearby.",
+    "Action: distinct daily bathroom, shower, laundry-room, or sink-drain context focused on drain coverage."
   ],
   organizer: [
     "Action: product rests on a stable surface while the correct items are placed into slots, compartments, hooks, or shelves.",
@@ -7094,6 +7193,12 @@ function sellingVariantDirective(facts = {}) {
       "Function proof: opening, slit, elastic, vent, or transparent area solves the specific use problem.",
       "Before/result proof: one small uncovered/mess cue and one larger correctly covered result."
     ],
+    "drain-accessory": [
+      "Pain proof: show a bathroom, shower, sink, or laundry drain area protected by the loose perforated cover.",
+      "Result proof: one cover sits flat over the drain opening while water can pass through the holes.",
+      "Before/result proof: small uncovered drain or hair/debris cue plus larger covered drain result.",
+      "Quantity-value proof: show the selected loose pieces as replacement value, without rack, tray, holder, base, or divider."
+    ],
     organizer: [
       "Pain proof: stop the messy cabinet, drawer, desk, closet, sink area, or shelf by showing items organized by the product.",
       "Before/result proof: small messy problem cue plus larger tidy result, with items held in the real slots, hooks, compartments, or shelves.",
@@ -7225,7 +7330,8 @@ function finalPromptLayoutLine(facts = {}) {
 }
 
 function buildShortFinalImagePrompt(basePrompt, facts) {
-  const identity = finalPromptProductIdentity(facts, facts.kind === "高级A+" ? 300 : 240);
+  const identityMaxLength = facts.kind === "高级A+" || facts.kind === "SKU图" || facts.kind === "白底图" ? 300 : 240;
+  const identity = finalPromptProductIdentity(facts, identityMaxLength);
   const quantityLine = finalPromptQuantityLine(facts);
   const unitOfSale = facts.packageMode === "multipack" ? "" : finalPromptUnitOfSale(facts.unitOfSale);
   const unit = unitOfSale ? `Show product scope: ${unitOfSale}.` : "";
