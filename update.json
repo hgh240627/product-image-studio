@@ -1,10 +1,10 @@
 {
-  "latestVersion": "0.1.55",
-  "title": "v0.1.55",
+  "latestVersion": "0.1.56",
+  "title": "v0.1.56",
   "summary": "此版本包含最新修复和优化。",
-  "downloadUrl": "https://github.com/hgh240627/product-image-studio/releases/download/v0.1.55/product-image-studio-0.1.55-Windows-x64.exe",
-  "releaseNotesUrl": "https://github.com/hgh240627/product-image-studio/releases/tag/v0.1.55",
-  "publishedAt": "2026-06-03",
+  "downloadUrl": "https://github.com/hgh240627/product-image-studio/releases/download/v0.1.56/product-image-studio-0.1.56-Windows-x64.exe",
+  "releaseNotesUrl": "https://github.com/hgh240627/product-image-studio/releases/tag/v0.1.56",
+  "publishedAt": "2026-06-04",
   "notes": [
     "请查看 GitHub Release 页面了解更新内容。"
   ]
