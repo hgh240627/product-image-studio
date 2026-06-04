@@ -5244,14 +5244,16 @@ const SELLING_POINT_VARIATION_RULES = [
 ];
 
 const SCENE_VARIATION_RULES = [
-  "Scene variation: natural adult hand in-use action showing the product touching the correct target object at real scale.",
-  "Scene variation: target-market adult user partial-body action in the correct environment, ordinary realistic styling, product visible and not blocked.",
-  "Scene variation: immediate after-use result proof in the real environment, with the product still recognizable but not staged as a product-led hero.",
-  "Scene variation: placement or fit relationship in the correct location, using practical surroundings and no graphics.",
-  "Scene variation: process moment with believable adult use motion, natural crop, and enough context to understand where and why the product is used.",
-  "Scene variation: shopper scale proof through real surrounding objects and adult hand scale, while avoiding static SKU display or infographic composition.",
-  "Scene variation: tidy post-use environment with an adult user nearby or just leaving the frame, product naturally present, no headline, no callouts, no before-after layout.",
-  "Scene variation: realistic daily-use environment with the active component emphasized and the full set nearby only if that is natural."
+  "Scene variation 1: active use moment. Show one adult hand using the product with the correct target object at true scale.",
+  "Scene variation 2: pour/fill/process moment. Show the correct material, content, or target moving into or onto the product while the product stays upright and physically plausible.",
+  "Scene variation 3: table/setup placement. Show the product arranged naturally in its real environment before use, with surrounding context proving scale and occasion.",
+  "Scene variation 4: immediate after-use result. Show the result after correct use, product still recognizable, no staged product-only hero.",
+  "Scene variation 5: close real-life detail. Use a nearer lifestyle crop proving material, rim/contact/working part, and hand scale without hiding identity.",
+  "Scene variation 6: group/count in environment. Show the selected quantity or set naturally arranged in a real setting, not as a SKU catalog still.",
+  "Scene variation 7: user interaction from another camera angle. Use a different hand position, camera distance, and background from previous scene variants.",
+  "Scene variation 8: tidy post-use environment. Product naturally present after use, with ordinary surroundings and no infographic overlay.",
+  "Scene variation 9: storage/ready-to-use placement only when correct. Show the product ready for next use without inventing packaging or extra accessories.",
+  "Scene variation 10: occasion/result atmosphere. Show a distinct real occasion or room context where the product's correct use is obvious."
 ];
 
 
@@ -6188,11 +6190,11 @@ function buildProductFactCard(payload = {}, analysisInput = {}, maxLength = 1400
     analysis.product_summary_zh ? `AI product summary: ${analysis.product_summary_zh}` : "",
     identityBrief ? `Product identity: ${identityBrief}` : "",
     identityLock.visibleParts?.length ? `Must preserve parts: ${identityLock.visibleParts.slice(0, 6).join("; ")}` : "",
-    packageInputs.unitOfSale ? `User unit of sale: ${packageInputs.unitOfSale}` : "",
+    packageInputs.unitOfSale && payload.productPackageMode !== "multipack" ? `User unit of sale: ${packageInputs.unitOfSale}` : "",
     packageInputs.bundleComponents ? `Bundle components: ${compactPromptText(packageInputs.bundleComponents, 220)}` : "",
     packageInputs.componentDifferences ? `Bundle differences: ${compactPromptText(packageInputs.componentDifferences, 160)}` : "",
-    packageInputs.pcsCount ? `PCS count: ${packageInputs.pcsCount}` : "",
-    packageInputs.packArrangement ? `Pack/arrangement: ${compactPromptText(packageInputs.packArrangement, 160)}` : "",
+    packageInputs.pcsCount ? `PCS count for image generation: show ${packageInputs.pcsCount} identical product pieces; do not infer packaging from unit-of-sale wording.` : "",
+    packageInputs.packArrangement ? `Piece arrangement note: ${compactPromptText(packageInputs.packArrangement, 160)}` : "",
     analysis.unit_of_sale ? `AI unit of sale: ${analysis.unit_of_sale}` : "",
     analysis.unit_of_use ? `Unit of use: ${analysis.unit_of_use}` : "",
     analysis.use_relationship ? `Correct use relationship: ${analysis.use_relationship}` : "",
@@ -6345,7 +6347,9 @@ function modelPromptFactSourceText(facts = {}) {
 function modelCreativeBrief(prompt = "", facts = null) {
   const text = sanitizeFinalImagePromptText(prompt);
   if (!text || isInternalLocalPromptText(text)) return "";
+  if (/^create\s+(?:a|one)\s+(?:lifestyle usage image|selling-point image|sku product photo|ecommerce product image)\.?$/i.test(text)) return "";
   if (facts && unsupportedForeignMechanicConflict(text, modelPromptFactSourceText(facts))) return "";
+  if (facts && !facts.hasPackagingReference && /\b(?:retail box|gift box|carton|packaging|package|printed package|box beside|boxed set)\b/i.test(text)) return "";
   return compactPromptText(text.replace(/\s+/g, " "), 320);
 }
 
@@ -6382,8 +6386,8 @@ function modelSpecificTextPolicy(kind, platform) {
 function finalPromptMaxLengthForKind(kind = "", profile = {}) {
   if (kind === "白底图") return 760;
   if (kind === "SKU图") return 820;
-  if (kind === "场景图") return 1080;
-  if (kind === "卖点图") return 1080;
+  if (kind === "场景图") return 1250;
+  if (kind === "卖点图") return 1180;
   if (kind === "高级A+") return 1180;
   return Math.min(profile.maxLength || 960, 960);
 }
@@ -6604,6 +6608,7 @@ function modelPromptFacts(payload = {}, planItem = {}) {
   const normalizedPayload = { ...payload, analysis };
   const strategy = visualStrategyFromPayload(normalizedPayload, sanitizeProductIdentityBrief(payload.finalPrompt || analysis.final_prompt_en || ""));
   const productFacts = buildImagePromptProductFacts(normalizedPayload, analysis, strategy, 520);
+  const packageInputs = payload.packageInputs && typeof payload.packageInputs === "object" ? payload.packageInputs : {};
   const platform = normalizePlatformName(payload.brand?.platform || payload.platform || "Amazon");
   const palette = analysis.brand_palette || {};
   const font = analysis.brand_font_style || {};
@@ -6631,7 +6636,10 @@ function modelPromptFacts(payload = {}, planItem = {}) {
     kindLabel: publicKindLabel(planItem.kind),
     module: planItem.module || "",
     productFacts,
-    unitOfSale: finalPromptUnitOfSale(payload.packageInputs?.unitOfSale || strategy.unitOfSale || analysis.unit_of_sale),
+    unitOfSale: finalPromptUnitOfSale(packageInputs.unitOfSale || strategy.unitOfSale || analysis.unit_of_sale),
+    pcsCount: finalPromptPcsCount(packageInputs.pcsCount || analysis.pcs_count || analysis.quantity_count || analysis.quantity_requirement || packageInputs.unitOfSale || strategy.unitOfSale || analysis.unit_of_sale),
+    packageMode: payload.productPackageMode || analysis.product_package_mode || strategy.packageMode || "single",
+    hasPackagingReference: productReferenceHasPackaging(payload, analysis, strategy),
     useRelationship: promptTextField(strategy.useRelationship || analysis.use_relationship, 260),
     correctUse: promptTextField(strategy.correctUseMethod || analysis.correct_use_method, 220),
     interactionContract: strategy.interactionContract || analysis.interaction_contract || {},
@@ -6763,6 +6771,115 @@ function finalPromptCopyRule(facts = {}) {
   return "Minimal English text only if useful.";
 }
 
+function finalPromptPcsCount(value = "") {
+  const text = String(value || "").trim();
+  const match = text.match(/(?:^|[^\d])(\d{1,4})\s*(?:pcs|pieces?|件|只|个|支|套|杯|只装|个装)?/i);
+  if (!match) return "";
+  const count = Number(match[1]);
+  return Number.isFinite(count) && count > 1 ? String(count) : "";
+}
+
+function productReferenceHasPackaging(payload = {}, analysis = {}, strategy = {}) {
+  const source = [
+    payload.finalPrompt,
+    analysis.final_prompt_en,
+    analysis.product_summary_zh,
+    Array.isArray(analysis.detail_focus_areas) ? analysis.detail_focus_areas.join(" ") : "",
+    Array.isArray(strategy.detailFocus) ? strategy.detailFocus.join(" ") : "",
+    Array.isArray(strategy.identityLock?.visibleParts) ? strategy.identityLock.visibleParts.join(" ") : ""
+  ].filter(Boolean).join(" ");
+  const withoutNegatedPackaging = source
+    .replace(/\b(?:no|without|not|never)\s+(?:visible\s+)?(?:retail\s+)?(?:box|packaging|package|carton|gift box|printed box|label)s?\b/gi, " ")
+    .replace(/无(?:可见)?(?:包装|盒|纸盒|彩盒|外盒)|没有(?:可见)?(?:包装|盒|纸盒|彩盒|外盒)|不要(?:包装|盒|纸盒|彩盒|外盒)/g, " ");
+  return /\b(?:visible|shown|included|clear|printed|retail|gift|outer|product)\s+(?:package|packaging|box|carton|bag|pouch)\b|\b(?:package|packaging|box|carton|outer bag|retail box|printed box|gift box|clear bag|pouch)\s+(?:visible|shown|included)\b|可见(?:包装|盒|外袋|纸盒|彩盒)|包装(?:可见|出镜)|外袋(?:可见|出镜)/i.test(withoutNegatedPackaging);
+}
+
+function finalPromptQuantityLine(facts = {}) {
+  if (facts.packageMode === "multipack" && facts.pcsCount) {
+    return `Quantity: show exactly ${facts.pcsCount} identical product pieces, countable and separate; do not invent extra sale/display objects.`;
+  }
+  return "";
+}
+
+function finalPromptPackagingGuard(facts = {}) {
+  if (facts.hasPackagingReference) return "Only show sale/display materials that are visible in the uploaded reference image.";
+  return "Only the product pieces may look included; no extra sale/display materials or included-looking containers.";
+}
+
+function productScenarioFamily(facts = {}) {
+  const source = [facts.productFacts, facts.useRelationship, facts.correctUse, facts.visibleParts, facts.partFunctions].filter(Boolean).join(" ");
+  if (/\b(champagne|wine|glass|goblet|stemmed|tumbler|cup|mug|drinkware)\b/i.test(source)) return "drinkware";
+  if (/\b(peeler|knife|slicer|cutter|blade|kitchen tool|utensil|shredder)\b/i.test(source)) return "kitchen-tool";
+  if (/\b(cover|lid|splash guard|bowl cover|food cover|elastic rim)\b/i.test(source)) return "cover";
+  if (/\b(rack|holder|organizer|stand|storage)\b/i.test(source)) return "organizer";
+  return "general";
+}
+
+function sceneVariantDirective(facts = {}) {
+  const index = Math.max(0, Number(facts.variantIndex || 0));
+  const family = productScenarioFamily(facts);
+  const drinkware = [
+    "Action: an adult hand holds one glass by the stem in a celebratory table setting; other matching glasses sit nearby only if count is required.",
+    "Action: an adult hand pours champagne or sparkling wine from a bottle into an upright glass; liquid level stays below the rim and the glass remains stable.",
+    "Action: six empty glasses are arranged on a dining table before serving, with varied heights and reflections proving transparent glass material.",
+    "Action: after-use serving moment with several filled glasses on a table, no hand holding the same pose as other variants.",
+    "Action: close lifestyle detail of rim, bowl, stem, and base with realistic highlights, one hand touching the stem lightly.",
+    "Action: group count proof in a real table setting, exactly the selected number of identical glasses visible and separate.",
+    "Action: guest reaching for one upright glass from a table arrangement, different camera angle and background.",
+    "Action: tidy post-toast table scene with glasses naturally present, no retail packaging or display box.",
+    "Action: ready-to-serve bar or kitchen counter placement, glasses upright, bottle or beverage as context only.",
+    "Action: distinct occasion atmosphere such as dinner party, brunch table, or wedding-style toast, product use remains truthful."
+  ];
+  const kitchenTool = [
+    "Action: adult hand grips the real handle while the correct working part touches the target surface.",
+    "Action: process moment with the tool actively creating the expected result, product not inserted into the target incorrectly.",
+    "Action: prepared ingredients or result beside the tool, showing correct before/use/result relationship.",
+    "Action: scale proof on a countertop with ordinary kitchen context and product fully recognizable.",
+    "Action: close lifestyle detail of handle, working edge, and material texture without redesign.",
+    "Action: multi-piece or component count arranged nearby only when required by the selected quantity.",
+    "Action: different camera angle and hand position from previous tool variants.",
+    "Action: tidy after-use counter with product intact and target changed, not product broken.",
+    "Action: ready-to-use placement near the correct target object, no fake packaging.",
+    "Action: distinct daily cooking context with one clear use purpose."
+  ];
+  const general = [
+    "Action: active adult use with the correct target object and true scale.",
+    "Action: process moment showing a different step from the first variant.",
+    "Action: placement or setup in the correct real environment before use.",
+    "Action: immediate after-use result with product still recognizable.",
+    "Action: close lifestyle material/detail proof without hiding identity.",
+    "Action: group/count or scale proof in environment when quantity matters.",
+    "Action: alternate camera angle, distance, and hand position from other variants.",
+    "Action: tidy post-use scene with product naturally present.",
+    "Action: ready-to-use placement, no invented packaging or accessories.",
+    "Action: distinct occasion or room context that explains correct use."
+  ];
+  const table = family === "drinkware" ? drinkware : family === "kitchen-tool" ? kitchenTool : general;
+  const directive = table[index % table.length];
+  const setLine = Number(facts.totalForKind || 1) > 1
+    ? `This is scene variant ${index + 1} of ${facts.totalForKind}; do not repeat the action, hand pose, camera angle, background, or message from the other scene variants.`
+    : "";
+  return [directive, setLine].filter(Boolean).join(" ");
+}
+
+function sellingVariantDirective(facts = {}) {
+  const index = Math.max(0, Number(facts.variantIndex || 0));
+  const directives = [
+    "Proof type: outcome/result hero with one concise buyer benefit.",
+    "Proof type: active-use proof with a visible correct action.",
+    "Proof type: material/detail proof with one close product detail and one benefit headline.",
+    "Proof type: simple use-step card with no more than three visual steps.",
+    "Proof type: quantity/count value proof without invented packaging.",
+    "Proof type: restrained comparison or problem-result layout.",
+    "Proof type: scale/capacity/fit proof using real surroundings only.",
+    "Proof type: occasion/result benefit with clean negative space."
+  ];
+  const setLine = Number(facts.totalForKind || 1) > 1
+    ? `Selling-point variant ${index + 1} of ${facts.totalForKind}; use a different proof type, layout family, headline idea, and main visual from the other selling-point variants.`
+    : "";
+  return [directives[index % directives.length], setLine].filter(Boolean).join(" ");
+}
+
 function finalPromptUnitOfSale(value = "") {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -6790,10 +6907,10 @@ function finalPromptLayoutLine(facts = {}) {
     return `Clean real product-photo surface, complete purchase unit fully visible and countable, no props or use action. ${facts.uniqueAngle || "Tidy centered composition with realistic shadow."}`;
   }
   if (facts.kind === "场景图") {
-    return `${facts.uniqueAngle || "Show a believable real-use action or fit proof at true scale."} Natural environment, realistic contact, product remains clearly recognizable.`;
+    return `${sceneVariantDirective(facts)} ${facts.uniqueAngle || ""} Natural environment, realistic contact, product remains clearly recognizable.`;
   }
   if (facts.kind === "卖点图") {
-    return `${facts.uniqueAngle || "Show one visual proof of the benefit."} Clean information-card composition with generous negative space.`;
+    return `${sellingVariantDirective(facts)} ${facts.uniqueAngle || ""} Clean information-card composition with generous negative space.`;
   }
   if (facts.kind === "高级A+") {
     return `${facts.layoutFamily || "Detail annotation module"}: one dominant product/result visual, planned text zone, up to three grounded callouts.`;
@@ -6803,22 +6920,24 @@ function finalPromptLayoutLine(facts = {}) {
 
 function buildShortFinalImagePrompt(basePrompt, facts) {
   const identity = finalPromptProductIdentity(facts, facts.kind === "高级A+" ? 300 : 240);
-  const unitOfSale = finalPromptUnitOfSale(facts.unitOfSale);
-  const unit = unitOfSale ? `Show purchase unit: ${unitOfSale}.` : "";
+  const quantityLine = finalPromptQuantityLine(facts);
+  const unitOfSale = facts.packageMode === "multipack" ? "" : finalPromptUnitOfSale(facts.unitOfSale);
+  const unit = unitOfSale ? `Show product scope: ${unitOfSale}.` : "";
   const useLine = facts.kind === "SKU图" || facts.kind === "白底图" ? "" : finalPromptInteraction(facts, 250);
   const creativeBrief = modelCreativeBrief(basePrompt, facts);
-  const layout = compactPromptText(finalPromptLayoutLine(facts), facts.kind === "高级A+" ? 230 : 220);
+  const layout = compactPromptText(finalPromptLayoutLine(facts), facts.kind === "高级A+" ? 230 : facts.kind === "场景图" ? 360 : facts.kind === "卖点图" ? 300 : 220);
   const style = compactPhraseList(facts.visualTone || "clean commercial photography, truthful material texture", 95, 2);
   const lines = [
     finalPromptGoalLine(facts),
     identity ? `Reference product exactly: ${identity}.` : "",
+    quantityLine,
     unit,
     creativeBrief && facts.kind !== "SKU图" && facts.kind !== "白底图" ? `Creative direction: ${creativeBrief}.` : "",
     useLine ? sentenceCaseLine(useLine) : "",
     `Layout: ${sentenceCaseLine(layout)}`,
+    `Avoid: ${sentenceCaseLine([facts.avoidText, finalPromptPackagingGuard(facts)].filter(Boolean).join(", "))}`,
     `Style: ${sentenceCaseLine(style)}`,
-    `Text: ${finalPromptCopyRule(facts)}`,
-    `Avoid: ${sentenceCaseLine(facts.avoidText)}`
+    `Text: ${finalPromptCopyRule(facts)}`
   ];
   return compactPromptText(sanitizeFinalImagePromptText(lines.filter(Boolean).join("\n")), finalPromptMaxLengthForKind(facts.kind));
 }
@@ -7116,6 +7235,8 @@ function buildCategoryPromptRewriteUserText(items, imageModel = "") {
     "Preserve every part-function lock, correct-use-method lock, and forbidden-use-error exactly. Never rewrite them into vague wording.",
     "Preserve the Reference image identity lock exactly. In the final prompt, keep product identity as visible shape, materials, colors, count, silhouette, and parts; keep use relationship as a separate physical constraint. Never mix usage description into the product identity sentence.",
     "Use the Product fact card as factual identity/use/structure input only. Do not copy it as a long paragraph. Compress it into the shortest accurate subject and interaction lock.",
+    "For multi-PCS products, use only the PCS count as the image quantity instruction, such as \"show exactly 6 identical glasses\". Do not turn unit-of-sale words like box, set, pack, or case into visible packaging unless uploaded reference images visibly show that packaging.",
+    "Never invent a retail box, carton, gift box, printed package, label, or packaging insert from purchase-unit wording alone. Packaging may appear only when it is part of the uploaded product reference.",
     "When writing the final image prompt, do not include marketplace names such as Temu, Amazon, Shopee, or Etsy. Translate platform intent into generic wording such as mobile marketplace, ecommerce listing, marketplace-safe product-led hero, selling-point image, or detail-page module.",
     "Final prompts must be English only. Do not include Chinese/CJK characters, Chinese category names, Chinese module names, or Chinese unit-of-sale text. Translate them into concise English before returning.",
     "Never use ellipses, placeholder dots, or truncated fragments such as \"...\" in final prompts.",
@@ -7679,8 +7800,7 @@ async function generateOneImage(config, payload, promptItem, index, total, sendP
   }
   const model = resolveImageModelForPayload(config, payload);
   const categoryPrompt = overridePrompt || promptItem.prompt || buildCategoryPrompt(payload, planItem);
-  const promptAlreadyFinal = !overridePrompt && /^prompt-api/.test(String(promptItem.promptSource || ""));
-  const modelPrompt = promptAlreadyFinal ? categoryPrompt : adaptImagePromptForModel(categoryPrompt, model, payload, planItem);
+  const modelPrompt = adaptImagePromptForModel(categoryPrompt, model, payload, planItem);
   const prompt = withNegativePrompt(modelPrompt, payload.negativePrompt);
   const requestBody = await resolveGrsaiGenerationBody(config, payload, model, prompt, planItem);
   const requestSpec = resolveGrsaiRequestSpec(config, requestBody);

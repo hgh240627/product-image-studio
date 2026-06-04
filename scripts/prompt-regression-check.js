@@ -107,7 +107,7 @@ assert.match(scenePrompt, /Scene-narrative grammar|Scene quality check/i, "scene
 const adapted = adaptImagePromptForModel(scenePrompt, "gpt-image-2", payload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.doesNotMatch(adapted, /Prompt profile:/i, "final image prompt should not expose internal prompt profile prefix");
 assert.match(adapted, /product after use|tool remains intact|target after use|produce skin/i, "final prompt must preserve product-after-use and target-after-use constraints");
-assert.ok(adapted.length <= 1080, `final scene prompt must stay concise, got ${adapted.length} chars`);
+assert.ok(adapted.length <= 1250, `final scene prompt must stay concise, got ${adapted.length} chars`);
 assert.match(adapted, /Reference product exactly|Correct relationship|Layout:|Style:|Avoid:/i, "final adapted prompt must keep the short final-prompt structure");
 assert.doesNotMatch(adapted, /Prompt-case grammar|Quality checklist|Product-only check|Geometry check/i, "final prompt must not expose bulky internal checklist labels");
 
@@ -193,14 +193,63 @@ const staleStorageDraft = [
 const splashAdapted = adaptImagePromptForModel(staleStorageDraft, "gpt-image-2", splashGuardPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.doesNotMatch(splashAdapted, /Closet Storage|storage bag|zipper lid|sewn handles|soft goods|place the bag/i, "final prompt must drop unsupported stale storage-bag creative brief");
 assert.match(splashAdapted, /mixing bowl|splash guard|center mixer|red opening flap|side handle/i, "final prompt must keep the current product facts");
-assert.ok(splashAdapted.length <= 1080, `final splash-guard scene prompt must stay concise, got ${splashAdapted.length} chars`);
+assert.ok(splashAdapted.length <= 1250, `final splash-guard scene prompt must stay concise, got ${splashAdapted.length} chars`);
 
 const splashSkuPrompt = buildCategoryPrompt(splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
 const splashSkuAdapted = adaptImagePromptForModel(splashSkuPrompt, "gpt-image-2", splashGuardPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
 assert.ok(splashSkuAdapted.length <= 820, `final splash-guard SKU prompt must stay concise, got ${splashSkuAdapted.length} chars`);
 assert.match(splashSkuAdapted, /SKU product photo|Reference product exactly|No visible text|Avoid:/i, "final SKU prompt must keep a compact ecommerce structure");
-assert.match(splashSkuAdapted, /Show purchase unit: one product unit/i, "Chinese single-unit input must become concise English purchase-unit wording");
+assert.match(splashSkuAdapted, /Show product scope: one product unit/i, "Chinese single-unit input must become concise English product-scope wording");
 assert.doesNotMatch(splashSkuAdapted, /\?{2,}|[\u3400-\u9fff]/, "final SKU prompt must not leak Chinese text or placeholder question marks");
 assert.doesNotMatch(splashSkuAdapted, /Product identity:.*Product identity:|HEX color codes|palette legend|medical|safety certification|eco claims|non-toxic|BPA/i, "final SKU prompt must avoid repeated identity labels and bulky risky negative terms");
+
+const champagneGlassPayload = {
+  productPackageMode: "multipack",
+  productInfo: [
+    "Product: clear stemmed champagne glasses.",
+    "PCS count: 6.",
+    "Use: drinkware for serving champagne or sparkling wine.",
+    "Correct visual fact: show the glasses themselves; no retail packaging was uploaded."
+  ].join("\n"),
+  packageInputs: {
+    unitOfSale: "6pcs一盒",
+    pcsCount: "6",
+    packArrangement: "可数排列",
+    usageNotes: "饮品倒入杯肚且低于杯口；不要倒置、叠放满杯或把底座当容器。"
+  },
+  brand: {
+    platform: "Amazon",
+    region: "EU",
+    language: "English"
+  },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Six clear stemmed champagne glasses with tall narrow bowls, slender stems, round bases, transparent glass material, and no visible retail box or packaging.",
+  analysis: {
+    product_package_mode: "multipack",
+    product_summary_zh: "6个透明高脚香槟杯",
+    unit_of_sale: "6pcs一盒",
+    use_relationship: "the glasses stand upright on a table and may hold champagne below the rim",
+    correct_use_method: "place each glass upright on its round base; pour beverage into the bowl below the rim",
+    detail_focus_areas: ["clear glass bowl", "slender stem", "round base"],
+    part_function_map: ["glass bowl = holds drink", "stem = hand grip", "round base = table support"]
+  }
+};
+
+const glassPromptApiDraft = [
+  "Create a selling-point image for a 6-piece champagne glass set.",
+  "Show a premium retail box for the 6pcs set beside the glasses."
+].join(" ");
+const glassAdapted = adaptImagePromptForModel(glassPromptApiDraft, "gpt-image-2", champagneGlassPayload, { kind: K_SELL, variantIndex: 0, totalForKind: 1 });
+assert.match(glassAdapted, /Quantity: show exactly 6 identical product pieces/i, "multi-PCS final prompt must use PCS count as visual quantity");
+assert.doesNotMatch(glassAdapted, /\b(?:purchase unit|unit of sale|retail box|gift box|carton|packaging|package insert|printed package)\b/i, "multi-PCS final prompt must not turn unit-of-sale wording into visible packaging");
+assert.match(glassAdapted, /Only the product pieces may look included|no extra sale\/display materials/i, "multi-PCS final prompt must block invented sale/display objects without naming boxes");
+
+const glassSceneOne = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 10 });
+const glassSceneTwo = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 10 });
+assert.notEqual(glassSceneOne, glassSceneTwo, "same-category scene variants must produce different final prompts");
+assert.match(glassSceneOne, /holds one glass by the stem|adult hand holds one glass/i, "first drinkware scene should use a stem-holding action");
+assert.match(glassSceneTwo, /pours champagne|sparkling wine .* into an upright glass/i, "second drinkware scene should use a pouring action, not repeat hand-holding");
+assert.match(glassSceneTwo, /variant 2 of 10|do not repeat the action/i, "multi-scene prompt must include explicit diversity guard");
 
 console.log("prompt regression checks passed");
