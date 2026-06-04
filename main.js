@@ -526,6 +526,10 @@ function isNanoBananaModel(model) {
   return String(model || "").toLowerCase().startsWith("nano-banana");
 }
 
+function usesGrsaiNativeGenerateApi(model) {
+  return isNanoBananaModel(model) || isGptImage2Model(model) || isGptImage2VipModel(model);
+}
+
 function normalizeResolution(value) {
   const text = String(value || "").toUpperCase();
   return ["1K", "2K", "4K"].includes(text) ? text : "1K";
@@ -3729,33 +3733,37 @@ async function requestGrsaiRealImageTest(config) {
     throw new Error("作图 API 连接检测失败：请先选择要检测的作图模型。");
   }
   const size = resolveGrsaiImageSize(model, "1K", "1:1");
-  const url = `${trimSlash(config.imageBaseUrl || config.grsaiBaseUrl)}/v1/images/generations`;
   const prompt = [
     aspectRatioInstruction("1:1", size),
     "Create a very simple clean square test image for API connectivity: a small blue check mark icon centered on a plain white background. No text, no product, no watermark."
   ].join("\n\n");
+  const requestSpec = resolveGrsaiRequestSpec(config, {
+    model,
+    prompt,
+    image: [],
+    size,
+    response_format: "url",
+    aspectRatio: "1:1",
+    imageSize: "1K",
+    resolution: "1K"
+  });
   let body;
   try {
-    body = await requestJson(url, {
+    body = await requestJson(requestSpec.endpoint, {
       method: "POST",
       headers: authHeaders(config.imageApiKey || config.grsaiApiKey),
-      body: JSON.stringify({
-        model,
-        prompt,
-        image: [],
-        size,
-        response_format: "url"
-      }),
+      body: JSON.stringify(requestSpec.body),
       timeoutMs: SINGLE_IMAGE_TIMEOUT_MS
     });
   } catch (error) {
     throw appendRequestDebug(error, "作图检测", {
       供应商: config.imageProvider || "grsai",
+      接口模式: requestSpec.apiMode,
       模型: model,
       尺寸: size,
       比例: "1:1",
       参考图数量: 0,
-      请求地址: url,
+      请求地址: requestSpec.endpoint,
       配置文件: configPath()
     });
   }
@@ -3770,7 +3778,7 @@ async function requestGrsaiRealImageTest(config) {
     models: fallbackImageModels("grsai"),
     modelInfo: GRSAI_IMAGE_MODEL_INFO,
     modelDetails: grsaiImageModelDetails(),
-    note: `已真实调用 Grsai /v1/images/generations 并生成测试图。检测模型：${model}；测试尺寸：${size}。`
+    note: `已真实调用 Grsai ${new URL(requestSpec.endpoint).pathname} 并生成测试图。检测模型：${model}；测试尺寸：${size}。`
   };
 }
 
@@ -4981,6 +4989,48 @@ async function resolveGrsaiGenerationBody(config, payload, model, prompt, planIt
     response_format: "url",
     aspectRatio: ratio,
     imageSize: size
+  };
+}
+
+function resolveGrsaiNativeAspectRatio(model, ratio, size) {
+  if (isGptImageModel(model)) return size || ratio || "1:1";
+  return ratio || "1:1";
+}
+
+function resolveGrsaiNativeGenerationBody(requestBody) {
+  const body = {
+    model: requestBody.model,
+    prompt: requestBody.prompt,
+    images: requestBody.image || [],
+    aspectRatio: resolveGrsaiNativeAspectRatio(requestBody.model, requestBody.aspectRatio, requestBody.size),
+    replyType: "json"
+  };
+  if (isNanoBananaModel(requestBody.model)) {
+    body.imageSize = normalizeResolution(requestBody.imageSize || requestBody.resolution || "1K");
+  }
+  return body;
+}
+
+function resolveGrsaiRequestSpec(config, requestBody) {
+  const baseUrl = trimSlash(config.imageBaseUrl || config.grsaiBaseUrl);
+  if (usesGrsaiNativeGenerateApi(requestBody.model)) {
+    const body = resolveGrsaiNativeGenerationBody(requestBody);
+    return {
+      endpoint: `${baseUrl}/v1/api/generate`,
+      body,
+      apiMode: "native-generate"
+    };
+  }
+  return {
+    endpoint: `${baseUrl}/v1/images/generations`,
+    body: {
+      model: requestBody.model,
+      prompt: requestBody.prompt,
+      image: requestBody.image,
+      size: requestBody.size,
+      response_format: requestBody.response_format
+    },
+    apiMode: "openai-compatible"
   };
 }
 
@@ -7294,7 +7344,7 @@ function promptFailureResult(promptItem, model = "") {
 }
 
 function normalizeGrsaiGenerationResults(body, model, promptItem = {}) {
-  const data = Array.isArray(body?.data) ? body.data : [];
+  const data = Array.isArray(body?.data) ? body.data : Array.isArray(body?.results) ? body.results : [];
   return data.map((item) => ({
     url: String(item?.url || item?.b64_json || "").trim(),
     model,
@@ -7633,13 +7683,7 @@ async function generateOneImage(config, payload, promptItem, index, total, sendP
   const modelPrompt = promptAlreadyFinal ? categoryPrompt : adaptImagePromptForModel(categoryPrompt, model, payload, planItem);
   const prompt = withNegativePrompt(modelPrompt, payload.negativePrompt);
   const requestBody = await resolveGrsaiGenerationBody(config, payload, model, prompt, planItem);
-  const generationBody = {
-    model: requestBody.model,
-    prompt: requestBody.prompt,
-    image: requestBody.image,
-    size: requestBody.size,
-    response_format: requestBody.response_format
-  };
+  const requestSpec = resolveGrsaiRequestSpec(config, requestBody);
 
   sendProgress?.({
     stage: "submitting",
@@ -7653,18 +7697,18 @@ async function generateOneImage(config, payload, promptItem, index, total, sendP
     progress: 3
   });
 
-  const url = `${trimSlash(config.imageBaseUrl || config.grsaiBaseUrl)}/v1/images/generations`;
   let body;
   try {
-    body = await requestJson(url, {
+    body = await requestJson(requestSpec.endpoint, {
       method: "POST",
       headers: authHeaders(config.imageApiKey || config.grsaiApiKey),
-      body: JSON.stringify(generationBody),
+      body: JSON.stringify(requestSpec.body),
       timeoutMs: SINGLE_IMAGE_TIMEOUT_MS
     });
   } catch (error) {
     throw appendRequestDebug(error, "正式作图", {
       供应商: config.imageProvider || "grsai",
+      接口模式: requestSpec.apiMode,
       模型: model,
       尺寸: requestBody.size,
       比例: requestBody.aspectRatio,
@@ -7672,7 +7716,7 @@ async function generateOneImage(config, payload, promptItem, index, total, sendP
       图片类型: planItem.kind,
       参考图数量: requestBody.image.length,
       参考图格式: requestBody.referenceImageSummary,
-      请求地址: url,
+      请求地址: requestSpec.endpoint,
       配置文件: configPath()
     });
   }
@@ -7777,31 +7821,25 @@ async function repairOneImage(config, payload) {
     withNegativePrompt(buildRepairPrompt(payload), payload.negativePrompt),
     planItem
   );
-  const generationBody = {
-    model: requestBody.model,
-    prompt: requestBody.prompt,
-    image: requestBody.image,
-    size: requestBody.size,
-    response_format: requestBody.response_format
-  };
-  const url = `${trimSlash(config.imageBaseUrl || config.grsaiBaseUrl)}/v1/images/generations`;
+  const requestSpec = resolveGrsaiRequestSpec(config, requestBody);
   let body;
   try {
-    body = await requestJson(url, {
+    body = await requestJson(requestSpec.endpoint, {
       method: "POST",
       headers: authHeaders(config.imageApiKey || config.grsaiApiKey),
-      body: JSON.stringify(generationBody),
+      body: JSON.stringify(requestSpec.body),
       timeoutMs: SINGLE_IMAGE_TIMEOUT_MS
     });
   } catch (error) {
     throw appendRequestDebug(error, "局部修复作图", {
       供应商: config.imageProvider || "grsai",
+      接口模式: requestSpec.apiMode,
       模型: model,
       尺寸: requestBody.size,
       比例: requestBody.aspectRatio,
       参考图数量: requestBody.image.length,
       参考图格式: requestBody.referenceImageSummary,
-      请求地址: url,
+      请求地址: requestSpec.endpoint,
       配置文件: configPath()
     });
   }
@@ -8338,31 +8376,25 @@ if (app && ipcMain && process.env.PRODUCT_IMAGE_STUDIO_TEST_MODE !== "1") {
 
     const requestBody = await resolveWhiteBackgroundBody(config, payload);
     const model = requestBody.model;
-    const generationBody = {
-      model: requestBody.model,
-      prompt: requestBody.prompt,
-      image: requestBody.image,
-      size: requestBody.size,
-      response_format: requestBody.response_format
-    };
-    const url = `${trimSlash(config.imageBaseUrl || config.grsaiBaseUrl)}/v1/images/generations`;
+    const requestSpec = resolveGrsaiRequestSpec(config, requestBody);
     let body;
     try {
-      body = await requestJson(url, {
+      body = await requestJson(requestSpec.endpoint, {
         method: "POST",
         headers: authHeaders(config.imageApiKey || config.grsaiApiKey),
-        body: JSON.stringify(generationBody),
+        body: JSON.stringify(requestSpec.body),
         timeoutMs: SINGLE_IMAGE_TIMEOUT_MS
       });
     } catch (error) {
       throw appendRequestDebug(error, "白底作图", {
         供应商: config.imageProvider || "grsai",
+        接口模式: requestSpec.apiMode,
         模型: model,
         尺寸: requestBody.size,
         比例: requestBody.aspectRatio,
         参考图数量: requestBody.image.length,
         参考图格式: requestBody.referenceImageSummary,
-        请求地址: url,
+        请求地址: requestSpec.endpoint,
         配置文件: configPath()
       });
     }
@@ -8447,6 +8479,7 @@ module.exports = {
   physicalPlausibilityAuditRule,
   pruneExpiredHistoryResultsForTest: pruneExpiredHistoryResults,
   recoverHistoryFromCacheForTest: recoverHistoryFromCache,
+  resolveGrsaiRequestSpecForTest: resolveGrsaiRequestSpec,
   runBackgroundImageGenerationForTest: runBackgroundImageGeneration,
   sanitizeFinalImagePromptText,
   sanitizeProductIdentityBrief,

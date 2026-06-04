@@ -1,13 +1,13 @@
 {
   "name": "product-image-studio",
-  "version": "0.1.56-local.3",
+  "version": "0.1.56-local.4",
   "productName": "全自动套图生成",
   "description": "Local desktop tool for automated product image set generation.",
   "author": "Local",
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-electron.js",
-    "check": "node --check main.js && node --check preload.js && node --check renderer/app.js && node scripts/check-local-file-reference-guard.js && node scripts/check-overlay-layering.js",
+    "check": "node --check main.js && node --check preload.js && node --check renderer/app.js && node scripts/check-local-file-reference-guard.js && node scripts/check-overlay-layering.js && node scripts/check-grsai-native-routing.js",
     "prompt-check": "node scripts/prompt-regression-check.js",
     "trend-check": "node scripts/trend-network-check.js",
     "release-manifest": "node scripts/create-update-manifest.js",
