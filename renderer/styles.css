@@ -1762,6 +1762,7 @@ select {
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 12px;
   margin-top: 16px;
+  align-items: start;
 }
 
 .results.empty {
@@ -1806,18 +1807,23 @@ select {
   background: rgba(255, 255, 255, 0.48);
   overflow: hidden;
   box-shadow: 0 14px 38px rgba(47, 128, 237, 0.16);
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(34px, auto) auto;
+  align-content: start;
 }
 
 .result-card-pending {
-  min-height: 190px;
-  display: grid;
-  grid-template-rows: minmax(150px, 1fr) auto;
+  min-height: 0;
+  grid-template-rows: auto minmax(34px, auto) auto;
   border-color: rgba(96, 165, 250, 0.24);
   background: rgba(255, 255, 255, 0.48);
 }
 
 .result-pending-art {
-  min-height: 150px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
   display: grid;
   align-content: center;
   justify-items: center;
@@ -1827,6 +1833,14 @@ select {
   background:
     linear-gradient(135deg, rgba(47, 128, 237, 0.12), rgba(79, 191, 255, 0.1)),
     rgba(255, 255, 255, 0.42);
+}
+
+.result-media {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(238, 246, 255, 0.92);
 }
 
 .result-pending-art strong {
@@ -1896,9 +1910,11 @@ select {
   }
 }
 
-.result-card img {
+.result-card > img,
+.result-media img {
   width: 100%;
   aspect-ratio: 1;
+  height: auto;
   object-fit: cover;
   display: block;
   background: rgba(238, 246, 255, 0.92);
@@ -1978,6 +1994,11 @@ select {
   display: flex;
   gap: 8px;
   padding: 9px;
+}
+
+.result-actions-placeholder {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .result-actions button {
@@ -5532,16 +5553,30 @@ hr {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)) !important;
   gap: 14px;
   align-content: start;
+  align-items: start;
   overflow-y: auto;
 }
 
 .result-card {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(180px, auto) auto auto;
+  grid-template-rows: auto minmax(34px, auto) auto;
+  align-content: start;
 }
 
-.result-card img {
+.result-card-pending {
+  grid-template-rows: auto minmax(34px, auto) auto;
+}
+
+.result-pending-art,
+.result-media {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+}
+
+.result-card > img,
+.result-media img {
   width: 100%;
   aspect-ratio: 1 / 1;
   height: auto;

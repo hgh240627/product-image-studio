@@ -51,6 +51,7 @@ const state = {
     aplus: []
   },
   autoFilledProductInfo: "",
+  autoFilledProductInfoSignature: "",
   productFactsReviewPending: false,
   lastAnalyzedProductFacts: "",
   repairHasMarks: false,
@@ -109,7 +110,7 @@ const AUTO_LOGIN_STORAGE_KEY = "productImageStudioAutoLogin";
 const REMEMBER_INVITE_STORAGE_KEY = "productImageStudioRememberInvite";
 const ACTIVE_ROUTE_STORAGE_KEY = "productImageStudioRoute";
 const UPDATE_REMIND_LATER_STORAGE_KEY = "productImageStudioUpdateRemindLaterUntil";
-const RENDERER_BUILD_ID = "renderer-0.1.56-local.2-prompt-fact-guard";
+const RENDERER_BUILD_ID = "renderer-0.1.56-stale-ai-write-guard";
 const PROMPT_SCOPE_KEYS = ["image", "aplus", "ai"];
 let progressHideTimer = null;
 let generationWatchdogTimer = null;
@@ -2800,7 +2801,7 @@ function buildProductInfoText() {
   const mode = state.productPackageMode || "single";
   const copy = productModeCopy(mode);
   const name = els.productName?.value.trim() || "";
-  const details = els.productInfo?.value.trim() || "";
+  const details = productInfoDetailsForPayload();
   const packageInputs = buildPackageInputs();
   const modeLabel = mode === "bundle" ? "组合装" : mode === "multipack" ? "多PCS装" : "单品";
   return [
@@ -2816,7 +2817,7 @@ function buildProductInfoText() {
   ].filter(Boolean).join("\n");
 }
 
-function currentProductFactsSignature() {
+function productFactsSignaturePayload({ includeProductInfo = true } = {}) {
   const imageFacts = state.images.map((image) => {
     const data = String(image.dataUrl || "");
     return {
@@ -2826,13 +2827,40 @@ function currentProductFactsSignature() {
       tail: data.slice(-80)
     };
   });
-  return JSON.stringify({
+  const payload = {
     productPackageMode: state.productPackageMode || "single",
     productName: (els.productName?.value || "").trim(),
-    productInfo: (els.productInfo?.value || "").trim(),
     packageInputs: buildPackageInputs(),
     images: imageFacts
-  });
+  };
+  if (includeProductInfo) {
+    payload.productInfo = (els.productInfo?.value || "").trim();
+  }
+  return payload;
+}
+
+function currentCoreProductFactsSignature() {
+  return JSON.stringify(productFactsSignaturePayload({ includeProductInfo: false }));
+}
+
+function currentProductFactsSignature() {
+  return JSON.stringify(productFactsSignaturePayload());
+}
+
+function autoFilledProductInfoIsFresh() {
+  return Boolean(
+    state.autoFilledProductInfo
+    && state.autoFilledProductInfoSignature
+    && state.autoFilledProductInfoSignature === currentCoreProductFactsSignature()
+  );
+}
+
+function productInfoDetailsForPayload() {
+  const details = els.productInfo?.value.trim() || "";
+  if (details && state.autoFilledProductInfo && details === state.autoFilledProductInfo && !autoFilledProductInfoIsFresh()) {
+    return "";
+  }
+  return details;
 }
 
 function renderSharedProductThumbs(target, scope = "image") {
@@ -3338,7 +3366,7 @@ function hasProductInfoInput() {
   const packageInputs = buildPackageInputs();
   return Boolean(
     (els.productName?.value || "").trim()
-    || (els.productInfo?.value || "").trim()
+    || productInfoDetailsForPayload()
     || Object.values(packageInputs).some((value) => String(value || "").trim())
   );
 }
@@ -3375,19 +3403,25 @@ function composeEditableProductDescription(analysis = {}) {
   return lines.join("\n");
 }
 
-function shouldReplaceProductDescription() {
+function shouldReplaceProductDescription(previousAutoFilled = state.autoFilledProductInfo) {
   const current = els.productInfo?.value.trim() || "";
-  return !current || Boolean(state.autoFilledProductInfo && current === state.autoFilledProductInfo);
+  return !current || Boolean(previousAutoFilled && current === previousAutoFilled);
 }
 
 function syncEditableProductDescriptionFromAnalysis(analysis = {}) {
-  state.autoFilledProductInfo = composeEditableProductDescription(analysis);
-  if (els.productInfo && shouldReplaceProductDescription()) {
-    els.productInfo.value = state.autoFilledProductInfo;
+  const previousAutoFilled = state.autoFilledProductInfo;
+  const nextAutoFilled = composeEditableProductDescription(analysis);
+  if (els.productInfo && shouldReplaceProductDescription(previousAutoFilled)) {
+    state.autoFilledProductInfo = nextAutoFilled;
+    state.autoFilledProductInfoSignature = currentCoreProductFactsSignature();
+    els.productInfo.value = nextAutoFilled;
     updateProductInfoCharCount();
+  } else {
+    state.autoFilledProductInfo = "";
+    state.autoFilledProductInfoSignature = "";
   }
   state.productFactsReviewPending = false;
-  return Boolean(state.autoFilledProductInfo);
+  return Boolean(nextAutoFilled);
 }
 
 function updateProductInfoCharCount() {
@@ -3411,9 +3445,38 @@ function syncProductModeUi() {
   updateProductInfoCharCount();
 }
 
-function markProductFactsEdited() {
+function clearAutoFilledProductInfoState() {
+  state.autoFilledProductInfo = "";
+  state.autoFilledProductInfoSignature = "";
+}
+
+function reconcileAutoFilledProductInfoAfterEdit({ preserveProductInfo = false } = {}) {
+  const current = els.productInfo?.value.trim() || "";
+  const matchesAutoFill = Boolean(state.autoFilledProductInfo && current === state.autoFilledProductInfo);
+  const staleAutoFill = matchesAutoFill && !autoFilledProductInfoIsFresh();
+
+  if (preserveProductInfo) {
+    if (!matchesAutoFill || staleAutoFill) clearAutoFilledProductInfoState();
+    return false;
+  }
+
+  if (staleAutoFill) {
+    if (els.productInfo) {
+      els.productInfo.value = "";
+      updateProductInfoCharCount();
+    }
+    clearAutoFilledProductInfoState();
+    return true;
+  }
+
+  if (!matchesAutoFill) clearAutoFilledProductInfoState();
+  return false;
+}
+
+function markProductFactsEdited(options = {}) {
+  const clearedStaleAutoInfo = reconcileAutoFilledProductInfoAfterEdit(options);
   state.productFactsReviewPending = false;
-  const changed = !state.lastAnalyzedProductFacts || currentProductFactsSignature() !== state.lastAnalyzedProductFacts;
+  const changed = clearedStaleAutoInfo || !state.lastAnalyzedProductFacts || currentProductFactsSignature() !== state.lastAnalyzedProductFacts;
   if (changed) {
     state.analysis = null;
     state.lastAnalyzedProductFacts = "";
@@ -3424,7 +3487,11 @@ function markProductFactsEdited() {
     renderPromptPlan([]);
     if (els.summaryBox) els.summaryBox.value = "";
     if (els.sellingPointsBox) els.sellingPointsBox.value = "";
-    if (els.statusLine) els.statusLine.textContent = "商品信息已更新，生成时会直接使用当前填写内容";
+    if (els.statusLine) {
+      els.statusLine.textContent = clearedStaleAutoInfo
+        ? "商品信息已更新，旧 AI 帮写内容已清空，请重新 AI 帮写或手动填写。"
+        : "商品信息已更新，生成时会直接使用当前填写内容";
+    }
   }
 }
 
@@ -4703,8 +4770,26 @@ function renderGeneratingPlaceholder(total = 0, concurrency = 1, scope = generat
 function clearGeneratingPlaceholder(scope = generationResultScope()) {
   const container = activeResultsContainer(scope);
   if (!container || !container.classList.contains("generating-results")) return;
+  if (container.querySelector(".result-card-pending")) {
+    container.classList.remove("empty");
+    return;
+  }
   container.className = "results";
   container.innerHTML = "";
+}
+
+function appendPendingResultActions(card) {
+  const placeholderActions = document.createElement("div");
+  placeholderActions.className = "result-actions result-actions-placeholder";
+  placeholderActions.setAttribute("aria-hidden", "true");
+  ["保存", "打开", "提示词"].forEach((label) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = true;
+    button.textContent = label;
+    placeholderActions.appendChild(button);
+  });
+  card.appendChild(placeholderActions);
 }
 
 function createPendingResultCard(item) {
@@ -4723,6 +4808,7 @@ function createPendingResultCard(item) {
     </div>
     <div class="result-meta">${pendingCardTitle(item)} · 生成中</div>
   `;
+  appendPendingResultActions(card);
   return card;
 }
 
@@ -4775,6 +4861,11 @@ function replaceResultCard(result, index, resultNumber, scope = generationResult
   if (!container.querySelector(".result-card-pending")) {
     container.classList.remove("empty", "generating-results");
   }
+  requestAnimationFrame(() => {
+    container.classList.add("results-live-layout");
+    void container.offsetHeight;
+    container.classList.remove("results-live-layout");
+  });
 }
 
 function buildResultCard(result, index, scope = generationResultScope()) {
@@ -4796,7 +4887,9 @@ function buildResultCard(result, index, scope = generationResultScope()) {
       ? `<small class="result-prompt-note">${escapeHtml(promptWarning)}</small>`
       : "";
     card.innerHTML = `
-      <img src="${result.url}" alt="">
+      <div class="result-media">
+        <img src="${result.url}" alt="">
+      </div>
       <div class="result-meta">${title}${result.model ? ` · ${result.model}` : ""}${result.imageSize ? ` · ${result.imageSize}` : ""}</div>
       ${promptMeta}
       <div class="result-actions">
@@ -7250,7 +7343,7 @@ function bindEvents() {
   });
   els.productInfo?.addEventListener("input", () => {
     updateProductInfoCharCount();
-    markProductFactsEdited();
+    markProductFactsEdited({ preserveProductInfo: true });
   });
   bindPackageModeTabs();
   syncProductModeUi();

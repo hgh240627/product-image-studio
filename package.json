@@ -1,6 +1,6 @@
 {
   "name": "product-image-studio",
-  "version": "0.1.56-local.8",
+  "version": "0.1.56",
   "productName": "全自动套图生成",
   "description": "Local desktop tool for automated product image set generation.",
   "author": "Local",
