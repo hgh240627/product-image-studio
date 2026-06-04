@@ -5233,14 +5233,14 @@ const PRODUCT_ONLY_VARIATION_RULES = [
 
 
 const SELLING_POINT_VARIATION_RULES = [
-  "Selling-point variation: outcome hero information-card. Show the solved result as the main visual, product clearly responsible for it, with one compact benefit headline, generous negative space, and no split-screen comparison.",
-  "Selling-point variation: use-action proof card. Show an adult hand or realistic use action demonstrating the product solving one pain point, with one small callout zone and no before/after panel.",
-  "Selling-point variation: problem callout layout. Show the pain as a small secondary callout or inset while the product-led image focuses on the product-enabled solved state; do not divide the canvas into equal left/right halves.",
-  "Selling-point variation: compact three-step visual flow card. Use three small sequential cues such as pain, product action, result, with the result largest and most readable; no dense feature list.",
-  "Selling-point variation: close product plus solved environment. Use a near product view with the surrounding target object visibly improved, supported by 1-2 simple icons only if they clarify the result.",
-  "Selling-point variation: before/after comparison only for this variant. Use a restrained split or diagonal comparison with the product causing the improved result, not a repeated generic left-right template.",
-  "Selling-point variation: buyer-result badge layout. Product and solved outcome dominate, with one simple low-risk result badge and clean negative space for short copy.",
-  "Selling-point variation: pain-free moment. Show the user action becoming easier or tidier in a realistic scene-like infographic, keeping product accuracy and one clear result message."
+  "Selling-point variation: solved-pain hero. Show the messy, hard, awkward, or inconvenient buyer problem becoming solved by the product in one realistic result image, with one short benefit headline.",
+  "Selling-point variation: before-to-after proof. Use a simple before/result contrast where the product creates the improved result; keep the final solved result larger than the problem cue.",
+  "Selling-point variation: active solution moment. Show a realistic hand/action using the product to fix one buyer pain, with a simple product-led ad composition.",
+  "Selling-point variation: result-first environment. Show the improved area, task, fit, storage, serving, use, or organization result with the product visibly responsible.",
+  "Selling-point variation: pain cue plus clean result. Put one small problem cue near the edge and one dominant solved result, with a clean simple layout.",
+  "Selling-point variation: easier-use proof. Show the task becoming simpler, cleaner, tidier, or more controlled through correct product use, without unsupported performance claims.",
+  "Selling-point variation: buyer outcome poster. Product and solved outcome dominate, with one short headline and clean empty space.",
+  "Selling-point variation: practical problem/result scene. Use realistic surroundings and a direct pain-solving message with a simple marketplace-ad layout."
 ];
 
 const SCENE_VARIATION_RULES = [
@@ -5282,8 +5282,8 @@ function visualCaseGrammarFor(kind, planItem = {}, strategy = {}) {
       "The image should feel like a polished ecommerce product cutout, not a new product rendering or lifestyle composition."
     ],
     ["\u5356\u70b9\u56fe"]: [
-      "Information-card selling grammar: one large proof visual, one concise headline zone, one supporting cue or tiny phrase only if useful, clear negative space, and no dense specification sheet.",
-      "Choose one layout family only: outcome proof, structure detail, use-step card, restrained comparison, quantity-value card, or problem-result proof."
+      "Pain-solution selling grammar: one buyer pain or desired result, one dominant proof visual, one short headline, and a direct problem-to-result composition.",
+      "Use a marketplace ad layout: one dominant solved result, one small problem cue only if helpful, minimal text, and strong visual proof."
     ],
     ["\u573a\u666f\u56fe"]: [
       "Scene-narrative grammar: believable real environment, natural camera distance, adult hand/action only if it clarifies use, correct scale, visible product-target relationship, and one short title.",
@@ -5321,7 +5321,7 @@ function commercialPolishForKind(kind) {
   const polish = {
     ["\u0053\u004b\u0055\u56fe"]: "premium product catalog photography, ordered arrangement, tactile material clarity, realistic studio shadow, clean crop safety.",
     ["\u767d\u5e95\u56fe"]: "high-end ecommerce retouch, clean silhouette, accurate color, subtle dimensional lighting, no context.",
-    ["\u5356\u70b9\u56fe"]: "clean information-card layout, thumbnail-readable hierarchy, product-led proof visual, one concise benefit message, refined empty space.",
+    ["\u5356\u70b9\u56fe"]: "direct pain-solution marketplace ad, dominant solved result, one concise headline, realistic proof visual, thumbnail-readable outcome.",
     ["\u573a\u666f\u56fe"]: "natural lifestyle photography, believable daily-use context, true scale, practical surroundings, soft commercial light.",
     ["\u9ad8\u7ea7A+"]: "premium detail-page design, magazine-like hierarchy, clear text zone, restrained icon/callout system, product proof first."
   };
@@ -5332,7 +5332,7 @@ function compactVisualGrammarForKind(kind) {
   const grammar = {
     ["\u0053\u004b\u0055\u56fe"]: "brand-product studio catalog grammar: ordered geometry, countable purchase unit, true color, realistic shadow, tactile material.",
     ["\u767d\u5e95\u56fe"]: "premium retouch/cutout grammar: pure #FFFFFF isolation, crisp silhouette, accurate color, clean edge, truthful material.",
-    ["\u5356\u70b9\u56fe"]: "information-card grammar: one proof visual, one short headline zone, one buyer reason, clean negative space.",
+    ["\u5356\u70b9\u56fe"]: "pain-solution ad grammar: one buyer pain, one solved result, one short headline, product visibly causes the improvement.",
     ["\u573a\u666f\u56fe"]: "scene-narrative grammar: real environment, true scale, natural camera distance, correct product-target relationship, one short title.",
     ["\u9ad8\u7ea7A+"]: "detail-page module grammar: dominant proof visual, planned text zone, up to three grounded callouts, clear reading path."
   };
@@ -6350,6 +6350,7 @@ function modelCreativeBrief(prompt = "", facts = null) {
   if (/^create\s+(?:a|one)\s+(?:lifestyle usage image|selling-point image|sku product photo|ecommerce product image)\.?$/i.test(text)) return "";
   if (facts && unsupportedForeignMechanicConflict(text, modelPromptFactSourceText(facts))) return "";
   if (facts && !facts.hasPackagingReference && /\b(?:retail box|gift box|carton|packaging|package|printed package|box beside|boxed set)\b/i.test(text)) return "";
+  if (facts?.kind === "卖点图" && /\b(?:A\+|detail-page module|information-card|icon column|magnifier|specification block|callout|annotation)\b/i.test(text)) return "";
   return compactPromptText(text.replace(/\s+/g, " "), 320);
 }
 
@@ -6464,7 +6465,7 @@ function categoryInstructionForModel(kind, platform, strategy = {}) {
     return "Pure product retouch only: plain #FFFFFF background, centered fully visible product or purchase unit, improved material texture, cleaner edges, balanced light, no redesign, no surface line, props, hands, context, text, icons, or graphics.";
   }
   if (kind === "卖点图") {
-    return "Show one selling-point theme only: pain solved, material texture, structure advantage, correct function, use step, bundle value, quantity value, or easier result. The product must remain accurate, intact, and physically plausible; use the interaction contract when any use action appears.";
+    return "Create one pain-solution selling image: show a buyer problem, solved result, before/result contrast, easier task, tidier space, correct function, or quantity value. The product must visibly cause the improvement. Use direct marketplace-ad composition with one short headline and one dominant improvement.";
   }
   if (kind === "场景图") {
     return "Show believable real-life usage evidence at true scale with one short title. The product belongs naturally on or with its target object; no infographic overlay, no dense callouts, no wrong working part or wrong after-use state.";
@@ -6766,7 +6767,7 @@ function finalPromptInteraction(facts = {}, maxLength = 280) {
 function finalPromptCopyRule(facts = {}) {
   if (facts.kind === "SKU图" || facts.kind === "白底图") return "No visible text.";
   if (facts.kind === "场景图") return "One short English title only.";
-  if (facts.kind === "卖点图") return "One short English benefit headline only if useful.";
+  if (facts.kind === "卖点图") return "One short English pain/result headline only.";
   if (facts.kind === "高级A+") return "One headline plus up to three short grounded callouts.";
   return "Minimal English text only if useful.";
 }
@@ -6810,6 +6811,7 @@ function finalPromptPackagingGuard(facts = {}) {
 function productScenarioFamily(facts = {}) {
   const source = [facts.productFacts, facts.useRelationship, facts.correctUse, facts.visibleParts, facts.partFunctions].filter(Boolean).join(" ");
   const has = (pattern) => pattern.test(source);
+  if (has(/\b(under[-\s]?sink|sink cabinet|pull[-\s]?out tray|side cup holder|cup holder|cabinet organizer|drawer organizer|shelf organizer|storage rack|storage shelf|two[-\s]?tier organizer)\b/i)) return "organizer";
   if (has(/\b(champagne|wine|glass|goblet|stemmed|tumbler|cup|mug|drinkware|flute)\b|香槟杯|红酒杯|高脚杯|玻璃杯|水杯|茶杯|咖啡杯|杯子|杯具|饮具/i)) return "drinkware";
   if (has(/\b(phone|smartphone|tablet|laptop|notebook computer|charger|charging|cable|adapter|usb|type-c|screen protector|phone case|tablet case|laptop sleeve|earbud|headphone|device stand|phone stand|tablet stand|laptop stand|magsafe|power bank)\b|手机|平板|笔记本电脑|充电|数据线|转接头|适配器|耳机|蓝牙|电源|屏幕保护|钢化膜|手机壳|保护壳/i)) return "electronics-accessory";
   if (has(/\b(pet|dog|cat|leash|collar|harness|pet bowl|pet toy|grooming|litter|paw)\b|宠物|狗狗|小狗|猫咪|猫砂|牵引绳|项圈|胸背|宠物碗|宠物玩具|宠物梳|宠物护理/i)) return "pet";
@@ -7064,122 +7066,122 @@ function sellingVariantDirective(facts = {}) {
   const index = Math.max(0, Number(facts.variantIndex || 0));
   const family = productScenarioFamily(facts);
   const shared = [
-    "Proof type: outcome/result hero with one concise buyer benefit.",
-    "Proof type: active-use proof with a visible correct action.",
-    "Proof type: material/detail proof with one close product detail and one benefit headline.",
-    "Proof type: simple use-step card with no more than three visual steps.",
-    "Proof type: quantity/count value proof without invented packaging.",
-    "Proof type: restrained comparison or problem-result layout.",
-    "Proof type: scale/capacity/fit proof using real surroundings only.",
-    "Proof type: occasion/result benefit with clean negative space."
+    "Pain proof: show the product removing clutter, confusion, effort, mess, instability, poor fit, or another visible buyer pain.",
+    "Result proof: show the improved state after correct product use, with the product clearly causing the result.",
+    "Before/result proof: use one small problem cue and one larger solved result, not a feature explanation panel.",
+    "Action-solution proof: show the correct use action solving one visible problem.",
+    "Quantity-value proof: show selected count solving a real buyer need without invented packaging.",
+    "Fit/scale proof: show the product solving a fit, space, capacity, or placement pain in real surroundings.",
+    "Tidier/easier proof: show the task or area becoming cleaner, simpler, or more controlled through the product.",
+    "Occasion-result proof: show a practical result in a real occasion with one direct headline."
   ];
   const familySpecific = {
     drinkware: [
-      "Proof type: transparent glass clarity and rim/stem/base detail, with one refined benefit headline.",
-      "Proof type: stable serving result with drink level below rim and product upright.",
-      "Proof type: countable set value using the selected number of separate glasses, no sale/display materials.",
-      "Proof type: table occasion result with elegant real reflections and clean negative space."
+      "Pain proof: replace awkward serving or mismatched tableware with an elegant ready-to-serve drinkware result.",
+      "Result proof: stable upright serving with drink level below rim and the glass clearly usable.",
+      "Quantity-value proof: selected number of separate glasses ready for guests, no sale/display materials.",
+      "Occasion-result proof: table looks ready for a toast, brunch, or dinner with one direct headline."
     ],
     "kitchen-tool": [
-      "Proof type: working-edge function proof with correct target contact.",
-      "Proof type: grip comfort and control proof using visible hand position.",
-      "Proof type: result output proof such as peeled, sliced, shredded, organized, or prepared target.",
-      "Proof type: visible material/structure detail tied to durability without unsupported claims."
+      "Pain proof: show the tool solving a slow, messy, uneven, or awkward prep task through correct working-edge contact.",
+      "Action-solution proof: visible hand position and correct target contact make the task easier.",
+      "Result proof: prepared output such as peeled, sliced, shredded, trimmed, or organized food beside the tool.",
+      "Control proof: show cleaner handling and better task control without turning into a detail annotation."
     ],
     cover: [
-      "Proof type: fit/contact proof around the correct rim or target edge.",
-      "Proof type: splash/cover/result proof with the product in correct working position.",
-      "Proof type: visible opening, slit, elastic, vent, or transparent material detail.",
-      "Proof type: step proof from placement to covered result without wrong target object."
+      "Pain proof: show spills, splashes, dust, or uncovered contents becoming controlled by the cover.",
+      "Result proof: correct covered target with rim/contact visibly secure and the product clearly responsible.",
+      "Function proof: opening, slit, elastic, vent, or transparent area solves the specific use problem.",
+      "Before/result proof: one small uncovered/mess cue and one larger correctly covered result."
     ],
     organizer: [
-      "Proof type: tidy result proof with correct items held by slots, hooks, compartments, or shelves.",
-      "Proof type: structure advantage proof showing base support, divider spacing, or compartments.",
-      "Proof type: capacity/count proof using realistic items without inventing dimensions.",
-      "Proof type: before/result comparison where the product causes the organized result."
+      "Pain proof: stop the messy cabinet, drawer, desk, closet, sink area, or shelf by showing items organized by the product.",
+      "Before/result proof: small messy problem cue plus larger tidy result, with items held in the real slots, hooks, compartments, or shelves.",
+      "Space-result proof: show gained usable space or easier access in realistic surroundings without inventing dimensions.",
+      "Capacity-result proof: realistic items fit neatly and remain physically supported by the organizer."
     ],
     "soft-goods": [
-      "Proof type: textile texture and seam/zipper/handle detail.",
-      "Proof type: fold/open/carry/use-step proof with soft shape physically plausible.",
-      "Proof type: storage, travel, comfort, or placement result proof.",
-      "Proof type: set/quantity proof with separate fabric pieces only when selected."
+      "Pain proof: show loose items, awkward carrying, wrinkled storage, or exposed surfaces becoming tidier through the soft product.",
+      "Action-solution proof: fold, open, zip, carry, spread, or place the product in the correct real-use moment.",
+      "Result proof: storage, travel, comfort, cover, or placement result with fabric shape physically plausible.",
+      "Quantity-value proof: separate fabric pieces solve a set need only when selected."
     ],
     "electronics-accessory": [
-      "Proof type: compatibility relationship proof with the correct device contact.",
-      "Proof type: cable/port/mount/stand angle detail proof.",
-      "Proof type: desk, travel, car, or bedside result proof without fake logos.",
-      "Proof type: organized or protected device result, no unsupported specs."
+      "Pain proof: solve messy cables, poor viewing angle, device slipping, charging access, or desk clutter through correct device contact.",
+      "Action-solution proof: connect, dock, mount, place, or support the device accurately.",
+      "Result proof: organized, supported, protected, or easier-to-use device setup without fake logos.",
+      "Fit proof: compatible device relationship is visible and physically plausible, no unsupported specs."
     ],
     pet: [
-      "Proof type: correct pet-use relationship proof with true scale.",
-      "Proof type: buckle, bowl, bristle, toy, strap, or texture detail proof.",
-      "Proof type: daily pet-care result proof without exaggerated comfort or health claims.",
-      "Proof type: action step proof such as feeding, grooming, walking, playing, or placing."
+      "Pain proof: solve a feeding, grooming, walking, playing, carrying, or pet-area mess problem with true pet scale.",
+      "Action-solution proof: fastening, feeding, grooming, walking, playing, or placing shown safely and correctly.",
+      "Result proof: tidier pet area, controlled placement, served food, or clear pet-use result without exaggerated claims.",
+      "Fit/use proof: buckle, bowl, bristle, toy, strap, or texture supports the visible result."
     ],
     "outdoor-auto": [
-      "Proof type: attachment, grip, mount, unfold, or placement proof in correct outdoor/vehicle context.",
-      "Proof type: material/connector/fastener detail proof.",
-      "Proof type: practical result proof without adventure-poster styling.",
-      "Proof type: scale/fit proof using the correct vehicle, garden, travel, or tool target."
+      "Pain proof: solve a vehicle, travel, patio, garden, camping, carrying, mounting, or outdoor organization problem.",
+      "Action-solution proof: attach, grip, mount, unfold, place, or use the product with correct contact points.",
+      "Result proof: practical outdoor/vehicle task looks ready, tidy, secured, or easier without adventure-poster styling.",
+      "Fit proof: product fits the correct vehicle, garden, travel, or tool target with real scale."
     ],
     beauty: [
-      "Proof type: applicator, bristle, cap, mirror, handle, or texture detail proof.",
-      "Proof type: vanity/travel/grooming use-step proof.",
-      "Proof type: organized care result without body, medical, or exaggerated claims.",
-      "Proof type: material/finish proof with refined negative space."
+      "Pain proof: solve messy vanity, travel clutter, uneven application, awkward grooming, or hard-to-access care items.",
+      "Action-solution proof: apply, open, brush, comb, store, or place the product in a realistic care moment.",
+      "Result proof: organized vanity, ready-to-use travel setup, or tidier grooming result without body or health claims.",
+      "Texture/use proof: applicator, bristle, cap, mirror, handle, or texture supports the visible result."
     ],
     "cleaning-consumable": [
-      "Proof type: surface contact or cleaning process proof with correct target.",
-      "Proof type: texture/fiber/bristle/perforation detail proof.",
-      "Proof type: tidy result proof without quantified or exaggerated claims.",
-      "Proof type: refill/quantity proof with separate pieces only when selected."
+      "Pain proof: show mess, stains, scattered cleaning supplies, waste handling, or dirty surface becoming tidier through correct product use.",
+      "Action-solution proof: wipe, scrub, line, filter, absorb, or place the product against the correct target.",
+      "Result proof: cleaner-looking or more organized area without quantified or exaggerated claims.",
+      "Quantity-value proof: refill or count solves a practical repeated-use need only when selected."
     ],
     "kids-stationery": [
-      "Proof type: writing, drawing, sorting, assembling, or play process proof.",
-      "Proof type: tip/shape/material/detail proof.",
-      "Proof type: organized desk or activity result proof.",
-      "Proof type: set/count proof with separate pieces and safe neutral context."
+      "Pain proof: solve messy desk, scattered pieces, activity setup, learning organization, or craft preparation.",
+      "Action-solution proof: writing, drawing, sorting, assembling, opening, or play interaction shown safely.",
+      "Result proof: organized desk, finished drawing, assembled object, or ready activity setup.",
+      "Quantity-value proof: selected pieces solve a set/activity need with separate countable items."
     ],
     "health-care": [
-      "Proof type: correct daily-care handling proof with neutral non-clinical copy.",
-      "Proof type: strap, bristle, cap, pad, sensor tip, or contact surface detail proof.",
-      "Proof type: organized bathroom, bedside, dental, or first-aid result proof.",
-      "Proof type: safe use-step proof with neutral personal-care copy only."
+      "Pain proof: solve daily-care organization, handling, wearing, bathroom clutter, dental setup, or first-aid readiness with neutral non-clinical copy.",
+      "Action-solution proof: place, adjust, hold, open, wrap, brush, or use the product in a safe neutral care moment.",
+      "Result proof: organized bathroom, bedside, dental, or care setup without medical promises.",
+      "Fit/handling proof: strap, bristle, cap, pad, sensor tip, or contact surface supports the visible result."
     ],
     "sports-fitness": [
-      "Proof type: grip, stretch, support, wear, lift, or surface-contact proof in a realistic training setting.",
-      "Proof type: texture, handle, strap, padding, tread, or molded surface detail proof.",
-      "Proof type: ready-to-train organization or storage result without body-transformation claims.",
-      "Proof type: set/count proof with separate fitness pieces only when selected."
+      "Pain proof: solve slipping, scattered gear, awkward setup, poor grip, storage, or training readiness.",
+      "Action-solution proof: grip, stretch, support, wear, lift, place, or surface-contact shown correctly.",
+      "Result proof: ready-to-train organization or controlled use without body-transformation claims.",
+      "Quantity-value proof: selected fitness pieces solve a set/training need only when selected."
     ],
     "apparel-accessory": [
-      "Proof type: fit, fold, buckle, zip, lace, carry, or outfit-ready proof with true scale.",
-      "Proof type: stitching, textile, leather, clasp, sole, strap, or hardware detail proof.",
-      "Proof type: organized wardrobe, travel, or ready-to-wear result proof.",
-      "Proof type: pair/set quantity proof with separate pieces only when selected."
+      "Pain proof: solve outfit prep, carrying, travel clutter, wardrobe mess, fitting, folding, or access problem.",
+      "Action-solution proof: wear, fold, buckle, zip, lace, carry, adjust, or place the product correctly.",
+      "Result proof: organized wardrobe, ready-to-wear setup, packed travel surface, or fitted use state.",
+      "Pair/set proof: selected pieces or left/right pair solve a real use need only when selected."
     ],
     "jewelry-watch": [
-      "Proof type: worn scale and correct orientation proof on hand, wrist, neck, ear, or accessory tray.",
-      "Proof type: clasp, chain, dial, setting, stone-like surface, metal finish, or strap detail proof.",
-      "Proof type: refined everyday styling or occasion result without fake luxury or certification claims.",
-      "Proof type: pair/set proof with separate jewelry pieces only when selected."
+      "Pain proof: solve styling readiness, tangled accessories, hard-to-match outfit detail, or gift-prep presentation.",
+      "Action-solution proof: wear, fasten, adjust, place, or present the product with true scale and correct orientation.",
+      "Result proof: refined everyday styling, organized tray, or occasion-ready look without fake luxury claims.",
+      "Pair/set proof: selected jewelry pieces remain separate and countable only when selected."
     ],
     "home-decor-furniture": [
-      "Proof type: room fit and scale proof with the product naturally placed and clearly responsible for the result.",
-      "Proof type: base, leg, frame, shade, hinge, drawer, cushion, finish, or texture detail proof.",
-      "Proof type: before/result room organization or ambiance proof without fake installation claims.",
-      "Proof type: set/value proof with separate home pieces only when selected."
+      "Pain proof: solve room clutter, poor placement, dark corner, unused surface, storage, comfort, or fit problem.",
+      "Result proof: product naturally improves room organization, ambiance, fit, or usability and remains clearly visible.",
+      "Before/result proof: small problem cue plus larger improved room state without fake installation claims.",
+      "Set/value proof: selected home pieces solve a room setup need only when selected."
     ],
     "hardware-tool": [
-      "Proof type: working-part contact proof such as tightening, measuring, drilling, cutting, gripping, or fastening.",
-      "Proof type: metal finish, grip, bit, jaw, blade, scale mark, joint, or fastener detail proof.",
-      "Proof type: practical repair/install result proof with correct target material and force direction.",
-      "Proof type: set/count proof with separate tools or fasteners only when selected."
+      "Pain proof: solve loose fastener, awkward repair, messy toolbox, wrong grip, measuring, cutting, drilling, or installation task.",
+      "Action-solution proof: working part contacts the correct target while tightening, measuring, drilling, cutting, gripping, or fastening.",
+      "Result proof: practical repair/install result with correct target material and force direction.",
+      "Set/count proof: selected tools or fasteners solve a project need only when selected."
     ]
   };
   const directives = [...(familySpecific[family] || []), ...shared];
   const setLine = Number(facts.totalForKind || 1) > 1
-    ? `Selling-point variant ${index + 1} of ${facts.totalForKind}; use a different proof type, layout family, headline idea, and main visual from the other selling-point variants.`
+    ? `Selling-point variant ${index + 1} of ${facts.totalForKind}; use a different buyer pain, solved result, headline idea, main visual, camera angle, and problem cue from the other selling-point variants.`
     : "";
   return [directives[index % directives.length], setLine].filter(Boolean).join(" ");
 }
@@ -7214,7 +7216,7 @@ function finalPromptLayoutLine(facts = {}) {
     return `${sceneVariantDirective(facts)} ${facts.uniqueAngle || ""} Natural environment, realistic contact, product remains clearly recognizable.`;
   }
   if (facts.kind === "卖点图") {
-    return `${sellingVariantDirective(facts)} ${facts.uniqueAngle || ""} Clean information-card composition with generous negative space.`;
+    return `${sellingVariantDirective(facts)} ${facts.uniqueAngle || ""} Use a direct problem/result advertising composition with one dominant solved result, one short headline, and one small problem cue only if useful.`;
   }
   if (facts.kind === "高级A+") {
     return `${facts.layoutFamily || "Detail annotation module"}: one dominant product/result visual, planned text zone, up to three grounded callouts.`;
@@ -7551,7 +7553,7 @@ function buildCategoryPromptRewriteUserText(items, imageModel = "") {
     "Lifestyle usage image must include one short English title and correct product usage relationship.",
     "Detail annotation belongs to Advanced A+ as a detail annotation module, not as a standalone macro image type.",
     "Apply the visual case-library quality layer from the local prompt. Treat it as abstract visual grammar only: exact subject, commercial role, composition, camera/lighting, material proof, text policy, and grouped avoid list. Do not copy external examples or invent a fixed style unrelated to the product.",
-    "For every final prompt, include enough concrete visual grammar for the selected category: SKU = brand-product studio catalog proof; white background = premium retouch/cutout; selling-point = clean information-card proof; scene = realistic usage narrative; A+ = detail-page module hierarchy.",
+    "For every final prompt, include enough concrete visual grammar for the selected category: SKU = brand-product studio catalog proof; white background = premium retouch/cutout; selling-point = direct pain-solution/result proof; scene = realistic usage narrative; A+ = detail-page module hierarchy.",
     "Before returning, check that each final prompt has product identity, category role, composition, lighting/material, physical relationship when needed, text policy, and short grouped avoid list.",
     "Improve product-specific clarity, visual specificity, and variation. Every returned prompt in this chunk must be visibly different in buyer question, setting, camera distance, layout family, product scale, text/no-text policy, and marketing role from the others unless the category explicitly requires pure product isolation.",
     "Do not add unsupported product features, wrong use cases, fake badges, watermarks, pricing, discounts, certification marks, or unsafe claims.",

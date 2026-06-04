@@ -97,8 +97,9 @@ const whitePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, 
 assert.match(whitePrompt, /product retouch|#FFFFFF|no redesign/i, "white-background prompt must be product retouch only");
 
 const sellPrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SELL, variantIndex: 0, totalForKind: 1 });
-assert.match(sellPrompt, /material texture|structure advantage|quantity value|one clear theme/i, "selling-point prompt must allow material, structure, and quantity value themes");
-assert.match(sellPrompt, /Information-card selling grammar|Selling-point quality check/i, "selling-point prompt must include information-card quality layer");
+assert.match(sellPrompt, /pain-solution|buyer problem|solved result|quantity value|one clear theme/i, "selling-point prompt must focus on buyer pain and solved results");
+assert.match(sellPrompt, /Pain-solution selling grammar|Selling-point quality check/i, "selling-point prompt must include pain-solution quality layer");
+assert.doesNotMatch(sellPrompt, /Information-card selling grammar/i, "selling-point prompt must not use the old information-card grammar");
 
 const scenePrompt = buildCategoryPrompt({ ...payload, imageKinds: normalized }, { kind: K_SCENE, variantIndex: 0, totalForKind: 1 });
 assert.match(scenePrompt, /short title|interaction contract|correct grip/i, "scene prompt must include short title and interaction contract");
@@ -244,6 +245,39 @@ const glassAdapted = adaptImagePromptForModel(glassPromptApiDraft, "gpt-image-2"
 assert.match(glassAdapted, /Quantity: show exactly 6 identical product pieces/i, "multi-PCS final prompt must use PCS count as visual quantity");
 assert.doesNotMatch(glassAdapted, /\b(?:purchase unit|unit of sale|retail box|gift box|carton|packaging|package insert|printed package)\b/i, "multi-PCS final prompt must not turn unit-of-sale wording into visible packaging");
 assert.match(glassAdapted, /Only the product pieces may look included|no extra sale\/display materials/i, "multi-PCS final prompt must block invented sale/display objects without naming boxes");
+assert.match(glassAdapted, /pain-solution|Pain proof|Result proof|Before\/result proof|problem\/result advertising composition|pain\/result headline/i, "selling-point final prompt must use pain/result selling grammar");
+assert.doesNotMatch(glassAdapted, /information-card|detail-page module layout|icon column|magnifier labels|specification block|structured callout system|up to three grounded callouts/i, "selling-point final prompt must not look like an Advanced A+ detail module");
+
+const underSinkOrganizerPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: black two-tier under-sink organizer rack with pull-out trays, side hanging cup, vertical support posts, and raised tray rims.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "place the rack under a sink cabinet; bottles and cleaning supplies stand on the trays; side cup holds small tools"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Black two-tier under-sink organizer with pull-out trays, side cup holder, vertical posts, raised rims, and stable rectangular base.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the organizer sits under a sink cabinet and holds cleaning bottles, sponges, and small tools on supported trays",
+    correct_use_method: "place the base flat under the sink, put bottles on each tray, and place small tools in the side cup",
+    detail_focus_areas: ["two pull-out trays", "side cup holder", "vertical support posts", "raised tray rims"],
+    part_function_map: ["trays = hold bottles", "side cup = holds small tools", "posts = support upper tray"]
+  }
+};
+const organizerSell = adaptImagePromptForModel("Create a selling-point image.", "gpt-image-2", underSinkOrganizerPayload, { kind: K_SELL, variantIndex: 0, totalForKind: 3 });
+assert.match(organizerSell, /messy cabinet|sink area|organized|tidy result|stop the messy|problem\/result/i, "organizer selling-point should focus on solving the under-sink mess pain");
+assert.doesNotMatch(organizerSell, /information-card|icon column|magnifier labels|specification block|structured callout system|Detail annotation module/i, "organizer selling-point should not use A+ module styling");
+const staleAplusSellDraft = [
+  "Create an information-card detail-page module with an icon column, magnifier labels, specification block, and multiple callouts.",
+  "Use the under-sink organizer as the main product."
+].join(" ");
+const organizerSellFromStaleDraft = adaptImagePromptForModel(staleAplusSellDraft, "gpt-image-2", underSinkOrganizerPayload, { kind: K_SELL, variantIndex: 1, totalForKind: 3 });
+assert.doesNotMatch(organizerSellFromStaleDraft, /information-card|detail-page module|icon column|magnifier labels|specification block|multiple callouts/i, "selling-point final prompt must drop stale A+ style creative briefs");
+assert.match(organizerSellFromStaleDraft, /Before\/result proof|solved result|problem cue|Pain proof|Result proof/i, "selling-point should fall back to local pain/result rules after dropping stale A+ drafts");
 
 const glassSceneOne = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 10 });
 const glassSceneTwo = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", champagneGlassPayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 10 });
