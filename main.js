@@ -5222,12 +5222,12 @@ const VARIATION_RULES = [
 ];
 
 const PRODUCT_ONLY_VARIATION_RULES = [
-  "Variation direction: front-facing product clarity with exact proportions.",
-  "Variation direction: clean three-quarter product angle with exact structure.",
-  "Variation direction: slight elevation change to reveal depth without adding context.",
-  "Variation direction: tighter product crop while keeping the full purchase unit visible.",
-  "Variation direction: orderly set arrangement with every component countable.",
-  "Variation direction: material clarity and edge definition, product-only."
+  "SKU real-photo variant: front-facing product-only tabletop shot, exact proportions, true material, real contact shadow.",
+  "SKU real-photo variant: slight three-quarter product-only tabletop shot, exact structure, natural light, no props.",
+  "SKU real-photo variant: slightly elevated camera on a plain real surface, full product visible, no context objects.",
+  "SKU real-photo variant: closer product-only crop with all edges intact, truthful texture and realistic shadow.",
+  "SKU real-photo variant: orderly countable arrangement on a clean real surface, every piece separate if quantity matters.",
+  "SKU real-photo variant: material clarity and edge definition on a neutral real surface, no decoration."
 ];
 
 
@@ -6395,7 +6395,7 @@ function finalPromptMaxLengthForKind(kind = "", profile = {}) {
 function modelSpecificAvoidText(kind, platform, negativePrompt = "") {
   const shared = ["watermarks/fake logos", "unsupported badges or claims", "distorted product", "extra product parts", "floating or fused objects"];
   if (kind === "SKU图") {
-    shared.push("props/hands/text/use scene");
+    shared.push("props/hands/text/use scene/decorative objects");
   }
   if (kind === "白底图") {
     shared.push("props/hands/scene/text");
@@ -6458,7 +6458,7 @@ function cleanSkuBackgroundVariant(facts = {}) {
 
 function categoryInstructionForModel(kind, platform, strategy = {}) {
   if (kind === "SKU图") {
-    return `Show only the exact complete purchase unit clearly and countably in a clean minimalist real-shot setup. Use a different simple real-photo background for every SKU image; no props, no decorative accessories, no host objects, no hands, no people, no use action, no text. ${strategy.packageMode === "bundle" || strategy.packageMode === "multipack" ? "Every included piece or pack count must remain truthful and easy to count." : "Do not add extra accessories or imply extra included items."}`;
+    return `SKU is a real product tabletop photo only: exact uploaded product, 100% identity preservation, true color/material/shape, real light and real shadow on a plain surface. No props, decoration, hands, people, use action, lifestyle context, host object, text, callouts, or invented packaging. ${strategy.packageMode === "bundle" || strategy.packageMode === "multipack" ? "Every selected piece count must be truthful, visible, separate, and easy to count." : "Do not add extra accessories or imply extra included items."}`;
   }
   if (kind === "白底图") {
     return "Pure product retouch only: plain #FFFFFF background, centered fully visible product or purchase unit, improved material texture, cleaner edges, balanced light, no redesign, no surface line, props, hands, context, text, icons, or graphics.";
@@ -6803,34 +6803,47 @@ function finalPromptQuantityLine(facts = {}) {
 
 function finalPromptPackagingGuard(facts = {}) {
   if (facts.hasPackagingReference) return "Only show sale/display materials that are visible in the uploaded reference image.";
+  if (facts.kind === "SKU图") return "Only the product pieces appear; no extra visible objects.";
   return "Only the product pieces may look included; no extra sale/display materials or included-looking containers.";
 }
 
 function productScenarioFamily(facts = {}) {
   const source = [facts.productFacts, facts.useRelationship, facts.correctUse, facts.visibleParts, facts.partFunctions].filter(Boolean).join(" ");
-  if (/\b(champagne|wine|glass|goblet|stemmed|tumbler|cup|mug|drinkware)\b/i.test(source)) return "drinkware";
-  if (/\b(peeler|knife|slicer|cutter|blade|kitchen tool|utensil|shredder)\b/i.test(source)) return "kitchen-tool";
-  if (/\b(cover|lid|splash guard|bowl cover|food cover|elastic rim)\b/i.test(source)) return "cover";
-  if (/\b(rack|holder|organizer|stand|storage)\b/i.test(source)) return "organizer";
+  const has = (pattern) => pattern.test(source);
+  if (has(/\b(champagne|wine|glass|goblet|stemmed|tumbler|cup|mug|drinkware|flute)\b|香槟杯|红酒杯|高脚杯|玻璃杯|水杯|茶杯|咖啡杯|杯子|杯具|饮具/i)) return "drinkware";
+  if (has(/\b(phone|smartphone|tablet|laptop|notebook computer|charger|charging|cable|adapter|usb|type-c|screen protector|phone case|tablet case|laptop sleeve|earbud|headphone|device stand|phone stand|tablet stand|laptop stand|magsafe|power bank)\b|手机|平板|笔记本电脑|充电|数据线|转接头|适配器|耳机|蓝牙|电源|屏幕保护|钢化膜|手机壳|保护壳/i)) return "electronics-accessory";
+  if (has(/\b(pet|dog|cat|leash|collar|harness|pet bowl|pet toy|grooming|litter|paw)\b|宠物|狗狗|小狗|猫咪|猫砂|牵引绳|项圈|胸背|宠物碗|宠物玩具|宠物梳|宠物护理/i)) return "pet";
+  if (has(/\b(cleaning|cleaning brush|scrub brush|dish brush|toilet brush|mop|sponge|microfiber|cloth|wipe|trash bag|liner|filter|detergent|laundry|dishwasher|duster)\b|清洁|清洁刷|洗碗刷|马桶刷|拖把|海绵|抹布|湿巾|垃圾袋|滤芯|洗衣|洗碗机|除尘/i)) return "cleaning-consumable";
+  if (has(/\b(makeup|cosmetic|beauty|skincare|mascara|lipstick|foundation|makeup brush|cosmetic brush|hair brush|hair comb|wide-tooth comb|mirror|hair|nail|personal care|toiletry|vanity)\b|化妆|美妆|护肤|口红|粉底|睫毛膏|化妆刷|粉扑|梳子|镜子|指甲|美容|洗漱|个人护理/i)) return "beauty";
+  if (has(/\b(health|healthcare|first aid|bandage|thermometer|massage|massager|brace|support belt|knee support|wrist support|posture|dental|toothbrush|floss|oral care)\b|健康|护理|急救|创可贴|绷带|体温计|按摩|护具|护膝|护腕|矫姿|牙刷|牙线|口腔/i)) return "health-care";
+  if (has(/\b(baby|kids|child|toy|game|puzzle|learning|school|stationery|pen|marker|crayon|notebook|craft|drawing)\b|婴儿|儿童|孩子|玩具|拼图|游戏|学习|学校|文具|画笔|马克笔|蜡笔|笔记本|手工|绘画/i)) return "kids-stationery";
+  if (has(/\b(yoga|fitness|exercise|workout|dumbbell|resistance band|sports?|training|gym|ball|helmet|protective gear)\b|瑜伽|健身|运动|训练|哑铃|弹力带|球类|头盔|护具/i)) return "sports-fitness";
+  if (has(/\b(apparel|clothing|garment|shirt|pants|dress|shoe|sneaker|hat|cap|belt|sock|glove|scarf|wallet|handbag)\b|服装|衣服|上衣|裤子|裙子|鞋|帽子|腰带|袜子|手套|围巾|钱包|手提包/i)) return "apparel-accessory";
+  if (has(/\b(jewelry|jewellery|watch|ring|necklace|bracelet|earring|pendant|brooch|anklet)\b|珠宝|首饰|手表|戒指|项链|手链|耳环|吊坠|胸针|脚链/i)) return "jewelry-watch";
+  if (has(/\b(peeler|knife|slicer|cutter|blade|kitchen tool|utensil|shredder|spatula|tongs|whisk|colander|measuring spoon|baking tool)\b|削皮器|刨丝|刀具|切片器|厨房工具|厨具|锅铲|夹子|打蛋器|滤网|量勺|烘焙工具/i)) return "kitchen-tool";
+  if (has(/\b(splash guard|bowl cover|food cover|elastic rim|pot lid|pan lid|container lid|protective cover|dust cover|cover lid)\b|防溅盖|碗盖|食物盖|保鲜盖|锅盖|盖子|防尘罩|保护罩|弹性边/i)) return "cover";
+  if (has(/\b(bag|pouch|tote|backpack|storage bag|packing cube|fabric|textile|blanket|pillow|curtain|mat|rug|towel|apron)\b|布袋|收纳袋|背包|手提袋|纺织|布料|毯子|枕头|窗帘|垫子|地毯|毛巾|围裙/i)) return "soft-goods";
+  if (has(/\b(rack|holder|organizer|storage|shelf|drawer|divider|basket|cabinet|hook)\b|收纳|置物架|架子|支架|挂架|抽屉|隔板|篮子|柜子|挂钩/i)) return "organizer";
+  if (has(/\b(home decor|decor|furniture|lamp|lighting|chair|table|sofa|vase|frame|clock|cushion|wall art|bathroom accessory)\b|家居|装饰|家具|灯具|椅子|桌子|沙发|花瓶|相框|时钟|靠垫|墙饰|浴室配件/i)) return "home-decor-furniture";
+  if (has(/\b(hardware|screwdriver|wrench|drill|hammer|pliers|screw|nail|fastener|toolbox|repair tool|measuring tape|level)\b|五金|螺丝刀|扳手|电钻|锤子|钳子|螺丝|钉子|紧固件|工具箱|维修工具|卷尺|水平尺/i)) return "hardware-tool";
+  if (has(/\b(car|auto|vehicle|bike|bicycle|motorcycle|outdoor|camping|garden|patio|travel|hiking|fishing|luggage|tent)\b|汽车|车载|车辆|自行车|摩托|户外|露营|花园|庭院|旅行|徒步|钓鱼|行李箱|帐篷/i)) return "outdoor-auto";
   return "general";
 }
 
-function sceneVariantDirective(facts = {}) {
-  const index = Math.max(0, Number(facts.variantIndex || 0));
-  const family = productScenarioFamily(facts);
-  const drinkware = [
+const SCENE_DIRECTIVE_TABLE = {
+  drinkware: [
     "Action: an adult hand holds one glass by the stem in a celebratory table setting; other matching glasses sit nearby only if count is required.",
     "Action: an adult hand pours champagne or sparkling wine from a bottle into an upright glass; liquid level stays below the rim and the glass remains stable.",
-    "Action: six empty glasses are arranged on a dining table before serving, with varied heights and reflections proving transparent glass material.",
+    "Action: empty glasses are arranged on a dining table before serving, with varied heights and reflections proving transparent glass material.",
     "Action: after-use serving moment with several filled glasses on a table, no hand holding the same pose as other variants.",
     "Action: close lifestyle detail of rim, bowl, stem, and base with realistic highlights, one hand touching the stem lightly.",
     "Action: group count proof in a real table setting, exactly the selected number of identical glasses visible and separate.",
     "Action: guest reaching for one upright glass from a table arrangement, different camera angle and background.",
-    "Action: tidy post-toast table scene with glasses naturally present, no retail packaging or display box.",
+    "Action: tidy post-toast table scene with glasses naturally present, no extra sale/display materials.",
     "Action: ready-to-serve bar or kitchen counter placement, glasses upright, bottle or beverage as context only.",
     "Action: distinct occasion atmosphere such as dinner party, brunch table, or wedding-style toast, product use remains truthful."
-  ];
-  const kitchenTool = [
+  ],
+  "kitchen-tool": [
     "Action: adult hand grips the real handle while the correct working part touches the target surface.",
     "Action: process moment with the tool actively creating the expected result, product not inserted into the target incorrectly.",
     "Action: prepared ingredients or result beside the tool, showing correct before/use/result relationship.",
@@ -6839,10 +6852,190 @@ function sceneVariantDirective(facts = {}) {
     "Action: multi-piece or component count arranged nearby only when required by the selected quantity.",
     "Action: different camera angle and hand position from previous tool variants.",
     "Action: tidy after-use counter with product intact and target changed, not product broken.",
-    "Action: ready-to-use placement near the correct target object, no fake packaging.",
+    "Action: ready-to-use placement near the correct target object, no fake sale/display materials.",
     "Action: distinct daily cooking context with one clear use purpose."
-  ];
-  const general = [
+  ],
+  cover: [
+    "Action: adult hands place the cover over the correct bowl, plate, container, or target rim with visible contact geometry.",
+    "Action: process moment showing the working opening, elastic rim, vent, or entry point used correctly.",
+    "Action: immediate result proof with the target covered, product edge/rim visible, and no fused objects.",
+    "Action: countertop scale proof with product and target object at true size, no product-only catalog setup.",
+    "Action: close lifestyle detail of rim, opening, texture, transparency, or flexible part while preserving full identity cues.",
+    "Action: quantity or set proof only if the selected count requires it, pieces separate and countable.",
+    "Action: alternate hand position and camera angle from other cover variants.",
+    "Action: tidy after-use kitchen scene with product naturally present and target still recognizable.",
+    "Action: ready-to-use placement near the correct target object, no invented packaging or accessories.",
+    "Action: distinct daily-use context such as baking, food prep, storage, or serving, depending on product facts."
+  ],
+  organizer: [
+    "Action: product rests on a stable surface while the correct items are placed into slots, compartments, hooks, or shelves.",
+    "Action: adult hand places or removes one target item, showing real contact points and gravity.",
+    "Action: before-use setup with empty organizer structure clearly visible and scale proven.",
+    "Action: after-use tidy result with organized items, product visibly responsible for the order.",
+    "Action: close detail of slots, dividers, hooks, seams, fasteners, or base support.",
+    "Action: capacity/count proof with realistic item quantity, no invented dimensions.",
+    "Action: alternate room or camera angle from other organizer variants.",
+    "Action: tidy post-use environment such as kitchen, closet, desk, garage, or bathroom as appropriate.",
+    "Action: ready-to-use placement on the correct surface or wall only if supported by product facts.",
+    "Action: distinct user scenario focused on repeated daily organization, not a decorative still life."
+  ],
+  "soft-goods": [
+    "Action: adult hand holds, folds, opens, zips, spreads, or places the soft product according to its real structure.",
+    "Action: process moment showing fabric flexibility, seam, zipper, handle, elastic, or opening used correctly.",
+    "Action: placement on the correct bed, sofa, closet shelf, travel bag, floor, or surface with true scale.",
+    "Action: after-use result with fabric shape, contents, or covered area physically plausible.",
+    "Action: close lifestyle detail of textile texture, stitching, edge, handle, zipper, weave, or softness.",
+    "Action: quantity or set proof only when needed, pieces separate and countable.",
+    "Action: alternate hand pose, fold state, camera angle, and background from other variants.",
+    "Action: tidy post-use environment with the product naturally present, no fake sale/display materials.",
+    "Action: ready-to-use placement before storage, travel, home use, or cleaning.",
+    "Action: distinct everyday context that explains the fabric product's real use."
+  ],
+  "electronics-accessory": [
+    "Action: adult hand installs, connects, docks, mounts, or places the accessory with the correct device relationship.",
+    "Action: process moment showing cable direction, port contact, hinge, stand angle, or grip point accurately.",
+    "Action: desk, car, bedside, travel, or work setup proving scale and compatible use without fake brand logos.",
+    "Action: after-use result such as device supported, cable organized, screen protected, or accessory in place.",
+    "Action: close detail of connector, edge, texture, magnet/clip/stand, or protective surface.",
+    "Action: set or quantity proof only when selected, pieces separate and not implied as extra devices.",
+    "Action: alternate camera angle and device orientation from other variants.",
+    "Action: tidy post-use workspace or travel scene with product naturally present.",
+    "Action: ready-to-use placement near compatible device, no invented packaging or certification badges.",
+    "Action: distinct everyday tech context focused on function, not decorative gadget collage."
+  ],
+  pet: [
+    "Action: adult hand uses the product with a dog, cat, or pet target only when the relationship is safe and obvious.",
+    "Action: process moment such as fastening, grooming, feeding, playing, carrying, or placing according to product facts.",
+    "Action: home, yard, walk, feeding area, grooming area, or travel setting proving pet scale.",
+    "Action: after-use result with pet comfort, organized area, served food, or controlled placement without exaggerated claims.",
+    "Action: close detail of buckle, strap, bowl, bristle, texture, seam, toy surface, or working part.",
+    "Action: quantity or set proof only when needed, pieces separate and not treated as pet accessories unless included.",
+    "Action: alternate pet angle, user hand pose, and environment from other variants.",
+    "Action: tidy post-use pet area with product naturally present.",
+    "Action: ready-to-use placement near the correct pet context, no invented packaging.",
+    "Action: distinct daily pet-care context focused on truthful use and scale."
+  ],
+  "outdoor-auto": [
+    "Action: adult hand installs, places, grips, unfolds, attaches, or uses the product in the correct outdoor/vehicle context.",
+    "Action: process moment showing strap, clip, mount, tool edge, handle, hinge, stake, or contact point accurately.",
+    "Action: car, bike, garden, campsite, patio, garage, travel, or workshop setting proving scale.",
+    "Action: after-use result with product still visible and physically supported.",
+    "Action: close detail of material, connector, grip, weather-facing surface, seam, fastener, or working edge.",
+    "Action: quantity or set proof only when selected, pieces separate and countable.",
+    "Action: alternate camera distance, hand pose, and environment from other variants.",
+    "Action: tidy post-use outdoor/vehicle scene with product naturally present.",
+    "Action: ready-to-use placement near the correct target object, no invented packaging or badges.",
+    "Action: distinct practical use context focused on function, not adventure-poster styling."
+  ],
+  beauty: [
+    "Action: adult hand holds, applies, opens, brushes, combs, stores, or places the product according to visible structure.",
+    "Action: process moment showing applicator, bristles, mirror, container opening, texture, or grip accurately.",
+    "Action: vanity, bathroom counter, travel pouch, salon, or grooming setup proving scale and use.",
+    "Action: after-use result through organized tools, applied texture, or tidy grooming area without body/health claims.",
+    "Action: close detail of bristles, applicator, cap, handle, surface finish, texture, or edge.",
+    "Action: quantity or set proof only when needed, pieces separate and countable.",
+    "Action: alternate hand pose, crop, and counter/background from other variants.",
+    "Action: tidy post-use vanity scene with product naturally present.",
+    "Action: ready-to-use placement near mirror or counter, no invented packaging or certification badges.",
+    "Action: distinct daily care context with restrained realistic styling."
+  ],
+  "cleaning-consumable": [
+    "Action: adult hand uses the product on the correct surface, container, appliance, or cleaning target.",
+    "Action: process moment showing wipe, brush, sponge, liner, filter, pod, cloth, or working surface contact accurately.",
+    "Action: kitchen, bathroom, laundry, trash area, appliance, sink, or countertop context proving scale.",
+    "Action: after-use result with cleaner/tidier target, product still physically plausible and not making unsupported claims.",
+    "Action: close detail of texture, fibers, perforation, absorbent surface, edge, bristles, or material.",
+    "Action: quantity or refill proof only when selected, pieces separate and not fused.",
+    "Action: alternate hand pose, target surface, and camera angle from other variants.",
+    "Action: tidy post-use environment with product naturally present.",
+    "Action: ready-to-use placement near correct cleaning target, no invented packaging.",
+    "Action: distinct daily cleaning context focused on visible truthful result."
+  ],
+  "kids-stationery": [
+    "Action: adult or neutral hand uses or places the product in a safe desk, play, learning, or craft context.",
+    "Action: process moment showing writing, drawing, assembling, sorting, opening, or play interaction accurately.",
+    "Action: desk, craft table, classroom-like surface, shelf, or play mat context proving scale.",
+    "Action: after-use result such as organized pieces, finished drawing, assembled object, or tidy setup.",
+    "Action: close detail of tip, texture, shape, connector, printed surface, or material.",
+    "Action: quantity or set proof only when selected, pieces separate and countable.",
+    "Action: alternate camera angle, hand pose, and surface color from other variants.",
+    "Action: tidy post-use desk or play scene with product naturally present.",
+    "Action: ready-to-use placement near correct activity target, no invented packaging.",
+    "Action: distinct educational, creative, or play context without unsafe or unsupported claims."
+  ],
+  "health-care": [
+    "Action: adult hand places, adjusts, holds, opens, or uses the product in a neutral home-care or personal-care context.",
+    "Action: process moment showing strap, cap, bristle, bandage edge, sensor tip, massage head, or contact surface accurately.",
+    "Action: bathroom counter, bedside table, gym bag, first-aid drawer, dental sink, or neutral tabletop proving scale.",
+    "Action: after-use organization or placement result with neutral daily-care wording only.",
+    "Action: close detail of texture, soft pad, bristle, hinge, cap, strap, edge, or readable non-brand surface.",
+    "Action: quantity or set proof only when selected, pieces separate and not treated as extra included accessories.",
+    "Action: alternate hand pose, body-contact crop, camera angle, and setting from other variants.",
+    "Action: tidy post-use personal-care area with product naturally present.",
+    "Action: ready-to-use placement near the correct safe target, no invented packaging or certification badges.",
+    "Action: distinct daily-care context focused on truthful handling and scale."
+  ],
+  "sports-fitness": [
+    "Action: adult hand grips, stretches, lifts, places, wears, or adjusts the product according to its real structure.",
+    "Action: process moment showing resistance, support, strap, handle, grip, surface contact, or protective position accurately.",
+    "Action: gym floor, yoga mat, home workout area, sports bag, field sideline, or training surface proving scale.",
+    "Action: after-use result with product resting naturally, not promising body transformation or medical benefit.",
+    "Action: close detail of texture, grip, seam, buckle, padding, tread, or molded surface.",
+    "Action: set or quantity proof only when selected, pieces separate and countable.",
+    "Action: alternate exercise step, hand pose, camera height, and background from other variants.",
+    "Action: tidy post-workout scene with product naturally present.",
+    "Action: ready-to-use placement near correct sport or exercise target, no invented packaging.",
+    "Action: distinct practical training context focused on function and durability cues without unsupported claims."
+  ],
+  "apparel-accessory": [
+    "Action: adult hand holds, wears, folds, buckles, zips, laces, adjusts, or places the product according to its real structure.",
+    "Action: process moment showing seam, buckle, zipper, strap, sole, clasp, fabric drape, or fit point accurately.",
+    "Action: wardrobe, entryway, dressing table, travel surface, closet shelf, or neutral outfit context proving scale.",
+    "Action: after-use result such as worn fit, organized placement, folded shape, or ready-to-go arrangement.",
+    "Action: close lifestyle detail of stitching, leather, textile weave, sole texture, clasp, edge, or hardware.",
+    "Action: quantity or pair proof only when selected, left/right or pieces separate and countable.",
+    "Action: alternate hand pose, garment state, crop, and background from other variants.",
+    "Action: tidy post-use closet or dressing scene with product naturally present.",
+    "Action: ready-to-use placement near correct body/outfit context, no invented packaging or brand logo.",
+    "Action: distinct everyday wear, travel, storage, or outfit-prep context while preserving product identity."
+  ],
+  "jewelry-watch": [
+    "Action: adult hand wears, fastens, places, opens, adjusts, or presents the product with true scale and correct orientation.",
+    "Action: process moment showing clasp, strap, chain, dial, stone setting, post, pin, or closure point accurately.",
+    "Action: vanity, dressing table, wrist/hand/neck/ear context, jewelry tray, or gift-prep surface proving scale.",
+    "Action: after-use result with product worn or placed neatly, no fake luxury brand marks or certificates.",
+    "Action: close detail of metal finish, gemstone-like surface, clasp, dial, chain link, setting, or texture.",
+    "Action: set or pair proof only when selected, pieces separate and countable.",
+    "Action: alternate body-contact crop, hand pose, camera angle, and light reflection from other variants.",
+    "Action: tidy post-use dressing scene with product naturally present.",
+    "Action: ready-to-wear placement near correct accessory context, no invented packaging.",
+    "Action: distinct occasion such as everyday styling, evening table prep, or simple gift moment without false claims."
+  ],
+  "home-decor-furniture": [
+    "Action: adult hand places, adjusts, switches, arranges, sits near, opens, or uses the product in the correct room context.",
+    "Action: process moment showing base support, shade, leg, frame, hinge, drawer, cushion, surface contact, or mounting point accurately.",
+    "Action: living room, bedroom, bathroom, entryway, kitchen, desk, shelf, or wall area proving scale.",
+    "Action: after-use result with product naturally integrated into the room and still clearly visible.",
+    "Action: close detail of finish, fabric, wood grain, metal edge, lamp shade, frame, texture, or hardware.",
+    "Action: quantity or set proof only when selected, pieces separate and not converted into decor props.",
+    "Action: alternate room angle, camera distance, hand pose, and lighting mood from other variants.",
+    "Action: tidy post-use home scene with product naturally present.",
+    "Action: ready-to-place composition near the correct room target, no invented packaging or installation claims.",
+    "Action: distinct home-use context focused on scale, fit, and material rather than decorative collage."
+  ],
+  "hardware-tool": [
+    "Action: adult hand grips, installs, tightens, measures, repairs, opens, cuts, drills, or places the tool with the correct working part.",
+    "Action: process moment showing bit, jaw, blade, handle, fastener, tape, level bubble, socket, or contact point accurately.",
+    "Action: workbench, garage, repair surface, wall, toolbox, wood board, metal part, or DIY setup proving scale.",
+    "Action: after-use result with fastener, measured surface, repaired item, or tool placement physically plausible.",
+    "Action: close detail of metal finish, grip texture, teeth, bit, scale markings, joint, or fastener contact.",
+    "Action: set or quantity proof only when selected, pieces separate and not implied as extra hardware unless included.",
+    "Action: alternate hand pose, target material, camera angle, and work surface from other variants.",
+    "Action: tidy post-repair scene with product naturally present.",
+    "Action: ready-to-use placement near correct repair target, no invented packaging or safety badges.",
+    "Action: distinct practical repair or installation context with correct force direction and contact mechanics."
+  ],
+  general: [
     "Action: active adult use with the correct target object and true scale.",
     "Action: process moment showing a different step from the first variant.",
     "Action: placement or setup in the correct real environment before use.",
@@ -6853,8 +7046,13 @@ function sceneVariantDirective(facts = {}) {
     "Action: tidy post-use scene with product naturally present.",
     "Action: ready-to-use placement, no invented packaging or accessories.",
     "Action: distinct occasion or room context that explains correct use."
-  ];
-  const table = family === "drinkware" ? drinkware : family === "kitchen-tool" ? kitchenTool : general;
+  ]
+};
+
+function sceneVariantDirective(facts = {}) {
+  const index = Math.max(0, Number(facts.variantIndex || 0));
+  const family = productScenarioFamily(facts);
+  const table = SCENE_DIRECTIVE_TABLE[family] || SCENE_DIRECTIVE_TABLE.general;
   const directive = table[index % table.length];
   const setLine = Number(facts.totalForKind || 1) > 1
     ? `This is scene variant ${index + 1} of ${facts.totalForKind}; do not repeat the action, hand pose, camera angle, background, or message from the other scene variants.`
@@ -6864,7 +7062,8 @@ function sceneVariantDirective(facts = {}) {
 
 function sellingVariantDirective(facts = {}) {
   const index = Math.max(0, Number(facts.variantIndex || 0));
-  const directives = [
+  const family = productScenarioFamily(facts);
+  const shared = [
     "Proof type: outcome/result hero with one concise buyer benefit.",
     "Proof type: active-use proof with a visible correct action.",
     "Proof type: material/detail proof with one close product detail and one benefit headline.",
@@ -6874,6 +7073,111 @@ function sellingVariantDirective(facts = {}) {
     "Proof type: scale/capacity/fit proof using real surroundings only.",
     "Proof type: occasion/result benefit with clean negative space."
   ];
+  const familySpecific = {
+    drinkware: [
+      "Proof type: transparent glass clarity and rim/stem/base detail, with one refined benefit headline.",
+      "Proof type: stable serving result with drink level below rim and product upright.",
+      "Proof type: countable set value using the selected number of separate glasses, no sale/display materials.",
+      "Proof type: table occasion result with elegant real reflections and clean negative space."
+    ],
+    "kitchen-tool": [
+      "Proof type: working-edge function proof with correct target contact.",
+      "Proof type: grip comfort and control proof using visible hand position.",
+      "Proof type: result output proof such as peeled, sliced, shredded, organized, or prepared target.",
+      "Proof type: visible material/structure detail tied to durability without unsupported claims."
+    ],
+    cover: [
+      "Proof type: fit/contact proof around the correct rim or target edge.",
+      "Proof type: splash/cover/result proof with the product in correct working position.",
+      "Proof type: visible opening, slit, elastic, vent, or transparent material detail.",
+      "Proof type: step proof from placement to covered result without wrong target object."
+    ],
+    organizer: [
+      "Proof type: tidy result proof with correct items held by slots, hooks, compartments, or shelves.",
+      "Proof type: structure advantage proof showing base support, divider spacing, or compartments.",
+      "Proof type: capacity/count proof using realistic items without inventing dimensions.",
+      "Proof type: before/result comparison where the product causes the organized result."
+    ],
+    "soft-goods": [
+      "Proof type: textile texture and seam/zipper/handle detail.",
+      "Proof type: fold/open/carry/use-step proof with soft shape physically plausible.",
+      "Proof type: storage, travel, comfort, or placement result proof.",
+      "Proof type: set/quantity proof with separate fabric pieces only when selected."
+    ],
+    "electronics-accessory": [
+      "Proof type: compatibility relationship proof with the correct device contact.",
+      "Proof type: cable/port/mount/stand angle detail proof.",
+      "Proof type: desk, travel, car, or bedside result proof without fake logos.",
+      "Proof type: organized or protected device result, no unsupported specs."
+    ],
+    pet: [
+      "Proof type: correct pet-use relationship proof with true scale.",
+      "Proof type: buckle, bowl, bristle, toy, strap, or texture detail proof.",
+      "Proof type: daily pet-care result proof without exaggerated comfort or health claims.",
+      "Proof type: action step proof such as feeding, grooming, walking, playing, or placing."
+    ],
+    "outdoor-auto": [
+      "Proof type: attachment, grip, mount, unfold, or placement proof in correct outdoor/vehicle context.",
+      "Proof type: material/connector/fastener detail proof.",
+      "Proof type: practical result proof without adventure-poster styling.",
+      "Proof type: scale/fit proof using the correct vehicle, garden, travel, or tool target."
+    ],
+    beauty: [
+      "Proof type: applicator, bristle, cap, mirror, handle, or texture detail proof.",
+      "Proof type: vanity/travel/grooming use-step proof.",
+      "Proof type: organized care result without body, medical, or exaggerated claims.",
+      "Proof type: material/finish proof with refined negative space."
+    ],
+    "cleaning-consumable": [
+      "Proof type: surface contact or cleaning process proof with correct target.",
+      "Proof type: texture/fiber/bristle/perforation detail proof.",
+      "Proof type: tidy result proof without quantified or exaggerated claims.",
+      "Proof type: refill/quantity proof with separate pieces only when selected."
+    ],
+    "kids-stationery": [
+      "Proof type: writing, drawing, sorting, assembling, or play process proof.",
+      "Proof type: tip/shape/material/detail proof.",
+      "Proof type: organized desk or activity result proof.",
+      "Proof type: set/count proof with separate pieces and safe neutral context."
+    ],
+    "health-care": [
+      "Proof type: correct daily-care handling proof with neutral non-clinical copy.",
+      "Proof type: strap, bristle, cap, pad, sensor tip, or contact surface detail proof.",
+      "Proof type: organized bathroom, bedside, dental, or first-aid result proof.",
+      "Proof type: safe use-step proof with neutral personal-care copy only."
+    ],
+    "sports-fitness": [
+      "Proof type: grip, stretch, support, wear, lift, or surface-contact proof in a realistic training setting.",
+      "Proof type: texture, handle, strap, padding, tread, or molded surface detail proof.",
+      "Proof type: ready-to-train organization or storage result without body-transformation claims.",
+      "Proof type: set/count proof with separate fitness pieces only when selected."
+    ],
+    "apparel-accessory": [
+      "Proof type: fit, fold, buckle, zip, lace, carry, or outfit-ready proof with true scale.",
+      "Proof type: stitching, textile, leather, clasp, sole, strap, or hardware detail proof.",
+      "Proof type: organized wardrobe, travel, or ready-to-wear result proof.",
+      "Proof type: pair/set quantity proof with separate pieces only when selected."
+    ],
+    "jewelry-watch": [
+      "Proof type: worn scale and correct orientation proof on hand, wrist, neck, ear, or accessory tray.",
+      "Proof type: clasp, chain, dial, setting, stone-like surface, metal finish, or strap detail proof.",
+      "Proof type: refined everyday styling or occasion result without fake luxury or certification claims.",
+      "Proof type: pair/set proof with separate jewelry pieces only when selected."
+    ],
+    "home-decor-furniture": [
+      "Proof type: room fit and scale proof with the product naturally placed and clearly responsible for the result.",
+      "Proof type: base, leg, frame, shade, hinge, drawer, cushion, finish, or texture detail proof.",
+      "Proof type: before/result room organization or ambiance proof without fake installation claims.",
+      "Proof type: set/value proof with separate home pieces only when selected."
+    ],
+    "hardware-tool": [
+      "Proof type: working-part contact proof such as tightening, measuring, drilling, cutting, gripping, or fastening.",
+      "Proof type: metal finish, grip, bit, jaw, blade, scale mark, joint, or fastener detail proof.",
+      "Proof type: practical repair/install result proof with correct target material and force direction.",
+      "Proof type: set/count proof with separate tools or fasteners only when selected."
+    ]
+  };
+  const directives = [...(familySpecific[family] || []), ...shared];
   const setLine = Number(facts.totalForKind || 1) > 1
     ? `Selling-point variant ${index + 1} of ${facts.totalForKind}; use a different proof type, layout family, headline idea, and main visual from the other selling-point variants.`
     : "";
@@ -6904,7 +7208,7 @@ function finalPromptLayoutLine(facts = {}) {
     return "Solid #FFFFFF background, full product visible, clean edges, accurate material and color, subtle contact shadow only if needed.";
   }
   if (facts.kind === "SKU图") {
-    return `Clean real product-photo surface, complete purchase unit fully visible and countable, no props or use action. ${facts.uniqueAngle || "Tidy centered composition with realistic shadow."}`;
+    return `Real tabletop product photo only: 100% faithful shape/color/material, fully visible and countable, plain real surface, natural realistic light, real contact shadow, no decoration or scene action. ${facts.uniqueAngle || "Tidy centered composition with realistic shadow."}`;
   }
   if (facts.kind === "场景图") {
     return `${sceneVariantDirective(facts)} ${facts.uniqueAngle || ""} Natural environment, realistic contact, product remains clearly recognizable.`;

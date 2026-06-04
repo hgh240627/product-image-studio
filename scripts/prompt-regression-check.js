@@ -252,4 +252,149 @@ assert.match(glassSceneOne, /holds one glass by the stem|adult hand holds one gl
 assert.match(glassSceneTwo, /pours champagne|sparkling wine .* into an upright glass/i, "second drinkware scene should use a pouring action, not repeat hand-holding");
 assert.match(glassSceneTwo, /variant 2 of 10|do not repeat the action/i, "multi-scene prompt must include explicit diversity guard");
 
+const electronicsPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: adjustable aluminum phone stand for desk use, with hinge, base, cradle slot, and anti-slip pads.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "place phone or tablet in the cradle slot; hinge adjusts viewing angle; base rests flat on desk"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Adjustable aluminum phone stand with flat base, hinge joint, raised cradle slot, anti-slip pads, and brushed metal finish.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the stand rests on a desk while a phone sits in the cradle slot",
+    correct_use_method: "place the base flat on the desk and put the phone into the front cradle slot; adjust the hinge angle",
+    detail_focus_areas: ["hinge joint", "front cradle slot", "flat base", "anti-slip pads"],
+    part_function_map: ["base = desk support", "hinge = angle adjustment", "cradle slot = holds phone"]
+  }
+};
+const electronicsScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", electronicsPayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 4 });
+assert.match(electronicsScene, /connects|docks|mounts|places|cable direction|port contact|hinge|stand angle|compatible device/i, "electronics accessories must use the electronics-specific scene matrix");
+
+const petPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: adjustable dog harness with buckle straps, chest panel, leash ring, and padded textile surface.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "fit the harness around the dog's chest; leash ring stays on top; buckles close at the side"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Adjustable dog harness with padded chest panel, side buckles, webbing straps, and top leash ring.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the harness fits around a dog's chest with the leash ring on top",
+    correct_use_method: "place the chest panel under the dog chest, close side buckles, keep leash ring upward",
+    detail_focus_areas: ["padded chest panel", "side buckle", "top leash ring", "webbing strap"],
+    part_function_map: ["chest panel = body contact area", "buckles = closure points", "leash ring = leash attachment"]
+  }
+};
+const petScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", petPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 3 });
+assert.match(petScene, /dog|cat|pet target|feeding|grooming|walking|playing|pet-care/i, "pet products must use the pet-specific scene matrix");
+
+const cleaningPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: long handle cleaning brush for bathroom tile and sink use, with stiff bristles, angled head, and hanging hole.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "hold the handle and press the bristles against tile grout, sink edge, or bathroom surface"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Long handle cleaning brush with angled plastic head, stiff bristles, grip handle, and hanging hole.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the brush bristles contact bathroom tile, sink edges, or grout lines while the handle stays in the hand",
+    correct_use_method: "grip the handle and scrub with the bristles against the correct surface",
+    detail_focus_areas: ["stiff bristles", "angled head", "grip handle", "hanging hole"],
+    part_function_map: ["handle = grip", "bristles = cleaning surface", "hanging hole = storage"]
+  }
+};
+const cleaningScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", cleaningPayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 4 });
+assert.match(cleaningScene, /wipe|brush|sponge|liner|filter|pod|cloth|working surface contact|cleaning target/i, "cleaning brushes must use the cleaning matrix instead of beauty brush logic");
+
+const apparelPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: women's crossbody handbag with zipper closure, adjustable shoulder strap, front pocket, and pebbled faux leather texture.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "wear across the body using the shoulder strap; open the zipper to access the main compartment"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Crossbody handbag with adjustable strap, zipper closure, front pocket, and pebbled faux leather surface.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the bag hangs from the shoulder or rests on a dressing surface; zipper opens the main compartment",
+    correct_use_method: "adjust the strap, wear crossbody, and open the zipper from the top",
+    detail_focus_areas: ["adjustable shoulder strap", "zipper closure", "front pocket", "pebbled surface"],
+    part_function_map: ["strap = carrying point", "zipper = opening closure", "front pocket = storage"]
+  }
+};
+const apparelScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", apparelPayload, { kind: K_SCENE, variantIndex: 0, totalForKind: 5 });
+assert.match(apparelScene, /wears|folds|buckles|zips|laces|adjusts|places|seam|buckle|zipper|strap/i, "apparel and accessories must use the apparel matrix");
+
+const hardwarePayload = {
+  productPackageMode: "single",
+  productInfo: "Product: compact ratchet screwdriver with magnetic bit holder, rubber grip handle, forward reverse switch, and included metal bits.",
+  packageInputs: {
+    unitOfSale: "one screwdriver with included bits",
+    usageNotes: "hold the rubber grip and place the bit into a screw head; use the switch to change direction"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Ratchet screwdriver with rubber grip, magnetic bit holder, direction switch, and separate metal bits.",
+  analysis: {
+    product_package_mode: "bundle",
+    unit_of_sale: "one screwdriver with included bits",
+    use_relationship: "the bit holder points toward a screw head while the handle stays in the hand",
+    correct_use_method: "insert the correct bit, place it in the screw head, and turn from the rubber grip",
+    detail_focus_areas: ["rubber grip", "magnetic bit holder", "direction switch", "metal bits"],
+    part_function_map: ["grip = hand hold", "bit holder = holds bit", "bit = contacts screw head"]
+  }
+};
+const hardwareScene = adaptImagePromptForModel("Create a lifestyle usage image.", "gpt-image-2", hardwarePayload, { kind: K_SCENE, variantIndex: 1, totalForKind: 4 });
+assert.match(hardwareScene, /bit|jaw|blade|handle|fastener|tape|level bubble|socket|contact point/i, "hardware tools must use the hardware matrix with correct working contact");
+
+const healthPayload = {
+  productPackageMode: "single",
+  productInfo: "Product: soft elastic wrist support brace with hook-and-loop strap, thumb opening, and breathable textile surface.",
+  packageInputs: {
+    unitOfSale: "single product",
+    usageNotes: "slide the thumb through the opening and wrap the strap around the wrist"
+  },
+  brand: { platform: "Amazon", region: "US", language: "English" },
+  ratio: "1:1",
+  resolution: "1K",
+  finalPrompt: "Elastic wrist support brace with thumb opening, hook-and-loop strap, and breathable textile surface.",
+  analysis: {
+    product_package_mode: "single",
+    unit_of_sale: "one product unit",
+    use_relationship: "the brace wraps around a wrist with the thumb through the opening",
+    correct_use_method: "place thumb through the opening, wrap around wrist, fasten the hook-and-loop strap",
+    detail_focus_areas: ["thumb opening", "hook-and-loop strap", "elastic textile", "edge stitching"],
+    part_function_map: ["thumb opening = orientation", "strap = closure", "textile body = wrist wrap"]
+  }
+};
+const healthSell = adaptImagePromptForModel("Create a selling-point image.", "gpt-image-2", healthPayload, { kind: K_SELL, variantIndex: 0, totalForKind: 3 });
+assert.match(healthSell, /daily-care|non-clinical|strap|bristle|cap|pad|sensor tip|contact surface/i, "health-care products must use health-care proof rules");
+assert.doesNotMatch(healthSell, /\b(?:cures?|heals?|pain relief|guaranteed recovery|medical grade)\b/i, "health-care selling prompts must avoid medical promises");
+
+const glassSkuFinal = adaptImagePromptForModel("Create a SKU product image.", "gpt-image-2", champagneGlassPayload, { kind: K_SKU, variantIndex: 0, totalForKind: 1 });
+assert.match(glassSkuFinal, /Real tabletop product photo only|100% faithful shape\/color\/material|plain real surface|real contact shadow/i, "SKU final prompt must enforce real product tabletop photography");
+const skuLayoutLine = glassSkuFinal.split("\n").find((line) => /^Layout:/i.test(line)) || "";
+assert.doesNotMatch(skuLayoutLine, /\bdecorative styling|lifestyle context|use action|hands|people|props\b/i, "SKU positive layout must not invite props, hands, or lifestyle scenes");
+assert.match(glassSkuFinal, /Only the product pieces appear; no extra visible objects/i, "SKU final prompt must block extra visible objects");
+
 console.log("prompt regression checks passed");
